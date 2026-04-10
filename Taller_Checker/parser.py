@@ -4,10 +4,15 @@ import sly
 from rich import print
 from rich.tree import Tree
 from lexer  import Lexer
-from model  import *
 from errors import error, errors_detected
 from graphviz import Digraph
 import uuid
+from model import (
+    Type, SimpleType, ArrayType, ArraySizedType, FuncType, Param,
+    Decl, Program, DeclTyped, DeclInit, ClassDecl,
+    Stmt, Print, Return, Break, Continue, Block, ExprStmt, If, For, While,
+    Expr, Name, Literal, Index, Call, MemberCall, Assign, TernOp, BinOp, UnaryOp, PrefixOp, PostfixOp, Constructor
+)
 
 
 def _L(node, lineno):

@@ -19,6 +19,15 @@ class Symbol:
 	def __repr__(self):
 		return f"Symbol(name={self.name!r}, kind={self.kind!r}, type={self.type!r})"
 		
+class Visitor():
+    def visit(self, node):
+        method_name = 'visit_' + node.__class__.__name__
+        visitor = getattr(self, method_name, self.generic_visit)
+        return visitor(node)
+
+    def generic_visit(self, node):
+        print(f"visitando nodo no definido: {node.__class__.__name__}")
+        pass
 		
 class Checker(Visitor):
 	def __init__(self):
@@ -215,3 +224,23 @@ class Checker(Visitor):
 	def visit(self, n: StringLiteral):
 		n.type = "string"
 
+
+if __name__ == "__main__":
+    import sys
+    from parser import parse
+
+    if len(sys.argv) != 2:
+        print("Uso: python checker.py <archivo.bminor>")
+        sys.exit(1)
+
+    filename = sys.argv[1]
+    with open(filename, encoding="utf-8") as f:
+        txt = f.read()
+        ast = parse(txt)
+        checker = Checker.check(ast)
+        if checker.ok():
+            print("No se encontraron errores semánticos.")
+        else:
+            print("Errores semánticos encontrados:")
+            for err in checker.errors:
+                print(err)

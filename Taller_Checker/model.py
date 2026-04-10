@@ -2,8 +2,12 @@ from dataclasses import dataclass
 from typing import List, Any, Optional, Union
 
 # CLASES DE NODOS
+class Node:
+	def __init__(self, name):
+		self.name = name
+
 # ---------- Types ----------
-class Type:
+class Type(Node):
 	...
 
 @dataclass(frozen=True)
@@ -25,16 +29,16 @@ class FuncType(Type):
 	params: List["Param"]
 
 @dataclass(frozen=True)
-class Param:
+class Param(Node):
 	name: str
 	typ: Type
 
 # ---------- Program / Decl ----------
-class Decl:
+class Decl(Node):
 	...
 
 @dataclass
-class Program:
+class Program(Node):
 	decls: List[Decl]
 
 @dataclass
@@ -54,7 +58,7 @@ class ClassDecl(Decl):
 	body: Optional[List[Decl]]
 
 # ---------- Statement ----------
-class Stmt:
+class Stmt(Node):
 	...
 
 @dataclass
@@ -100,7 +104,7 @@ class While(Stmt):
 	body: Stmt
 
 # ---------- Expressions ----------
-class Expr:
+class Expr(Node):
 	...
 
 @dataclass
@@ -137,7 +141,6 @@ class TernOp(Expr):
 	cond: Expr
 	then: Expr
 	otherwise: Expr
-
 
 @dataclass
 class BinOp(Expr):

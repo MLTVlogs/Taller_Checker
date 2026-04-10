@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections import ChainMap
 from dataclasses import dataclass, field
 from typing import Any, Optional, List
-
 from rich.table   import Table
 from rich.console import Console
 from rich         import print
@@ -182,4 +181,3 @@ if __name__ == "__main__":
 	
 	# Vista unificada desde b
 	# print(b.merged_view())
- 
