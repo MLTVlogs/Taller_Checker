@@ -5,6 +5,11 @@ from typing import List, Any, Optional, Union
 class Node:
 	def __init__(self, name):
 		self.name = name
+	def accept(self, visitor):
+		method_name = 'visit_' + self.__class__.__name__
+		method = getattr(visitor, method_name, visitor.generic_visit)
+		return method(self)
+		
 
 # ---------- Types ----------
 class Type(Node):
