@@ -133,7 +133,7 @@ class Call(Expr):
 
 @dataclass
 class MemberCall(Expr):
-	target: str
+	target: Expr
 	members: List[Expr]
 
 @dataclass

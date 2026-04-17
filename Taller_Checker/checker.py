@@ -43,7 +43,7 @@ class Checker(Visitor):
 	def check(cls, node):
 		checker = cls()
 		checker.open_scope("global")
-		node.accept(checker) # => El ast no tiene el método 'accept'
+		node.accept(checker)
 		return checker
 		
 	# -------------------------------------------------

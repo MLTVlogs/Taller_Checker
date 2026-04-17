@@ -300,7 +300,7 @@ class Parser(sly.Parser):
 		
 	@_("ID index")
 	def lval(self, p):
-		return p[0], p[1]
+		return _L(Index(p[0],p[1]),p.lineno)
 		
 	# -------------------------------------------------
 	# OPERADORES
@@ -445,11 +445,11 @@ class Parser(sly.Parser):
 	# ------------------------------------------------
 	@_("member_acc")
 	def member_acc_list(self, p):
-		return p[0]
+		return [p[0]]
 	
 	@_("member_acc_list member_acc")
 	def member_acc_list(self, p):
-		return [p[0]] + p[1]
+		return p[0] + [p[1]]
 	
 	@_("'.' ID")
 	def member_acc(self, p):
