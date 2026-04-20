@@ -77,7 +77,7 @@ class Checker(Visitor):
 			self.error(node, f"símbolo '{name}' no definido")
 		return sym
 		
-	def ok(self) -> bool:
+	def ok(self):
 		return len(self.errors) == 0
 	
 	# -------------------------------------------------
@@ -233,6 +233,7 @@ class Checker(Visitor):
 								elem_str = self.type_to_string(elem_type)
 								item_str = self.type_to_string(item.type)
 								self.error(n, f"elemento incompatible: esperado {elem_str} pero obtuvo {item_str}")
+								
 				elif hasattr(init_value, 'accept'):
 					# Inicializador de variable simple
 					init_value.accept(self)
