@@ -3,7 +3,7 @@
 var: integer;
 
 main: function void () = {
-    if (var == 0)
+    if (12 == 0)
         var++;
     else
         var--;

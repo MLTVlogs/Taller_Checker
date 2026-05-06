@@ -5,6 +5,7 @@ from typing import Any, Optional
 
 
 class IRRuntimeError(RuntimeError):
+	print("IRRuntimeError:", end=" ")
 	"""Generic IR interpreter error."""
 	
 	
