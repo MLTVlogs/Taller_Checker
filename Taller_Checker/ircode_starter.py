@@ -1,11 +1,13 @@
 from __future__ import annotations
+#IMPORTANTE!!!!!!!!!!!!!! todo esta escrito de la forma **opcode reg1 reg2 destino** no confundir el orden porque si no queda mal hecho todo esto
+#el orden viene desde la plantilla del profesor
 
 from dataclasses import dataclass, field
 from typing import Optional
 from rich import print
 
 from model import *
-from checker import Visitor
+from checker import *
 
 # ===================================================
 # Type constants
@@ -113,9 +115,11 @@ class IRCodeGen(Visitor):
     - retorno simple
     - parte de la selección de opcodes
 
-    Pendiente para estudiantes:
-    - completar BinOp
     - completar UnaryOp
+    - completar BinOp
+
+    
+    Pendiente para estudiantes:
     - completar Assign compuesto
     - completar If / While / For
     - completar Call
@@ -269,12 +273,12 @@ class IRCodeGen(Visitor):
     def binary_cmp_opcode(self, oper: str, ty: Type) -> str:
         suffix = self.type_suffix(ty)
         table = {
-            "==": f"EQ{suffix}",
-            "!=": f"NE{suffix}",
-            "<": f"LT{suffix}",
-            "<=": f"LE{suffix}",
-            ">": f"GT{suffix}",
-            ">=": f"GE{suffix}",
+            "==": f"CMP{suffix} ==",
+            "!=": f"CMP{suffix} !=",
+            "<": f"CMP{suffix} <",
+            "<=": f"CMP{suffix} <=",
+            ">": f"CMP{suffix} >",
+            ">=": f"CMP{suffix} >=",
         }
         if oper not in table:
             raise NotImplementedError(f"Comparación no soportada: {oper}")
@@ -498,16 +502,18 @@ class IRCodeGen(Visitor):
         Ya resuelto:
         - esqueleto general
         - aritmética básica + - * /
-        - comparaciones == != < <= > >= :DDDDDDDDDD
+        - comparaciones == != < <= > >= (:DDDDDDDDDD)
+        - operaciones bit a bit se supone (no? solo es conectarlo con lo que ya habia)
+        - booleanos lógicos (&& y ||) (la ia si le sabia, yo soy el idiota que no vio que eso ya estaba definido mas arriba)
 
         Pendiente:
-        - booleanos lógicos
-        - operaciones bit a bit
         - cortocircuito real para && y ||
+        - strings
         """
         left_reg = self.visit(node.left)
         right_reg = self.visit(node.right)
         left_ty = self.infer_type(node.left)
+        right_ty = self.infer_type(node.right)
         out = self.new_temp()
 
         if node.op in {"+", "-", "*", "/"}:
@@ -519,14 +525,51 @@ class IRCodeGen(Visitor):
             opcode = self.binary_cmp_opcode(node.op, left_ty)
             self.emit(opcode, left_reg, right_reg, out)
             return out
+        
+        if node.op in {"&", "|", "^"}:
+            opcode = self.binary_bit_opcode(node.op, left_ty)
+            self.emit(opcode, left_reg, right_reg, out)
+            return out
+        
+        if node.op in {"&&", "||"}:
+            opcode = "AND" if node.op == "&&" else "OR"
+
+            left_bool = self.new_temp()
+            right_bool = self.new_temp()
+
+            #guarda el resultaddo de cada uno de los lados de la operacion en un registro aparte
+            self.emit("CMPI !=", left_reg, 0, left_bool)
+            self.emit("CMPI !=", right_reg, 0, right_bool)
+
+            #y ahora compara esas 2 vainas para guardar en otro registro el resultado de las 2 cosas
+            self.emit(opcode, left_bool, right_bool, out)
+            return out
+
+
 
         raise NotImplementedError(
-            f"TODO estudiante: completar BinOp para operador {node.op!r}"
+            f"TODO estudiante: completar BinOp para operador {node.op!r} (aun faltan booleanos lógicos y cortocircuito)"
         )
 
     def visit_UnaryOp(self, node):
+        expr_reg = self.visit(node.expr)
+        expr_ty = self.infer_type(node.expr)
+        out = self.new_temp()
+
+        if node.op == "+":
+            self.emit(f"MOV{self.type_suffix(expr_ty)}", expr_reg, out)
+            return out
+        if node.op == "-":
+            zero = self.new_temp()
+            self.emit(f"MOV{self.type_suffix(expr_ty)}", 0, zero)
+            self.emit(f"SUB{self.type_suffix(expr_ty)}", zero, expr_reg, out)
+            return out
+        if node.op == "!":
+            self.emit(f"NOT{self.type_suffix(expr_ty)}", expr_reg, out)
+            return out
+
         raise NotImplementedError(
-            "TODO estudiante: implementar UnaryOp (+, -, !)"
+            "TODO estudiante: implementar UnaryOp (+, -, !) (esto deberia de estar completamente resuelto, si sale esto estamos jodidos)"
         )
 
     def visit_Literal(self, node):
@@ -538,12 +581,9 @@ class IRCodeGen(Visitor):
         elif node.kind == "char":
             value = ord(node.value) if isinstance(node.value, str) else int(node.value)
             self.emit("MOVB", value, tmp)
+
         elif node.kind == "string":
-            value = node.value if isinstance(node.value, str) else str(node.value)
-            string_label = "String" + tmp[1:]
-            self.emit(".STRINGZ", string_label, f'"{value}"')
-            self.emit("LEA", tmp, string_label)
-            return tmp
+            raise NotImplementedError(f"Literal tipo {node.kind} no soportado u")
         else:
             raise NotImplementedError(f"Literal tipo {node.kind} no soportado")
         return tmp
@@ -572,10 +612,6 @@ class IRCodeGen(Visitor):
         """Visita una llamada a miembro."""
         raise NotImplementedError("TODO estudiante: implementar llamadas a miembros")
 
-    def visit_PrefixOp(self, node):
-        """Visita un operador de prefijo."""
-        raise NotImplementedError("TODO estudiante: implementar operadores de prefijo")
-
     def visit_PostfixOp(self, node):
         """Visita un operador de postfijo."""
         raise NotImplementedError("TODO estudiante: implementar operadores de postfijo")
@@ -590,62 +626,137 @@ class IRCodeGen(Visitor):
 # ===================================================
 
 if __name__ == "__main__":
-    # Demo pequeña para que los estudiantes prueben la plantilla.
-    # Equivalente a:
-    #   main: function void () = {
-    #       msg: string = "Hola mundo";
-    #       print(msg);
-    #   }
-    ast = Program([
-        DeclInit(
-            name="main",
-            typ=FuncType(ret=VOID, params=[]),
-            init=Block(stmts=[
-                DeclInit(
-                    name="msg",
-                    typ=STRING,
-                    init=Literal(kind="string", value="Hola mundo"),
-                ),
-                Print(values=[Name(id="msg")]),
-            ]),
-        )
-    ])
-    ir = IRCodeGen.generate(ast)
-    print(ir.format())
-    
-    print("\n" + "="*50 + "\n")
-    
-    # Prueba: print("hola") directamente
-    ast2 = Program([
-        DeclInit(
-            name="main",
-            typ=FuncType(ret=VOID, params=[]),
-            init=Block(stmts=[
-                Print(values=[Literal(kind="string", value="Hola mundo")]),
-            ]),
-        )
-    ])
-    ir2 = IRCodeGen.generate(ast2)
-    print(ir2.format())
+    import sys
+
+    if "-ir" in sys.argv:
+        filename = sys.argv[1]
+        with open(filename, encoding="utf-8") as f:
+            txt = f.read()
+            check = semantic_check(txt) #.ok(), lista de errores, ast
+
+            if check[0]: sys.exit(1) #si hubieron errores semanticos pues no ejecuta ni mierda
+
+            ir = IRCodeGen.generate()
+            print(ir.format())
+
+    else:
+        print("Demo de IRCodeGen con ejemplos simples si desea ejecutar codigo txt usar -ir:\n")
+        # msg: string = "Hola mundo";
+        # print(msg);
+        ast = Program([
+            DeclInit(
+                name="main",
+                typ=FuncType(ret=VOID, params=[]),
+                init=Block(stmts=[
+                    DeclInit(
+                        name="msg",
+                        typ=STRING,
+                        init=Literal(kind="string", value="Hola mundo"),
+                    ),
+                    Print(values=[Name(id="msg")]),
+                ]),
+            )
+        ])
+        ir = IRCodeGen.generate(ast)
+        print(ir.format())
+        
+        print("\n" + "="*50 + "\n")
+        
+        # Prueba: print("hola") directamente
+        ast2 = Program([
+            DeclInit(
+                name="main",
+                typ=FuncType(ret=VOID, params=[]),
+                init=Block(stmts=[
+                    Print(values=[Literal(kind="string", value="Hola mundo")]),
+                ]),
+            )
+        ])
+        ir2 = IRCodeGen.generate(ast2)
+        print(ir2.format())
 
 
-    #prueba: x = (12 == 34)
-    ast3 = Program([
-        DeclInit(
-            name="main",
-            typ=FuncType(ret=VOID, params=[]),
-            init=Block(stmts=[
-                DeclTyped(name="x", typ=BOOL),
-                Assign(
-                    target=Name(id="x"),
-                    value=BinOp(
-                        left=Literal(kind="integer", value=12),
-                        op="==",
-                        right=Literal(kind="integer", value=34),
-                    )
-                ),
-            ]),
-        )
-    ])
-    ir3 = IRCodeGen.generate(ast3)
-    print(ir3.format())
+        #prueba: x = (12 == 34)
+        ast3 = Program([
+            DeclInit(
+                name="main",
+                typ=FuncType(ret=VOID, params=[]),
+                init=Block(stmts=[
+                    DeclTyped(name="x", typ=BOOL),
+                    Assign(
+                        target=Name(id="x"),
+                        value=BinOp(
+                            left=Literal(kind="integer", value=12),
+                            op="==",
+                            right=Literal(kind="integer", value=34),
+                        )
+                    ),
+                ]),
+            )
+        ])
+        ir3 = IRCodeGen.generate(ast3)
+        print(ir3.format())
+
+        print("\n" + "="*50 + "\n")
+
+        # Prueba: operaciones bitwise
+        # z = (5 & 3) | (2 ^ 1)
+        ast4 = Program([
+            DeclInit(
+                name="main",
+                typ=FuncType(ret=VOID, params=[]),
+                init=Block(stmts=[
+                    DeclInit(
+                        name="z",
+                        typ=INT,
+                        init=BinOp(
+                            left=BinOp(
+                                left=Literal(kind="integer", value=5),
+                                op="&",
+                                right=Literal(kind="integer", value=3),
+                            ),
+                            op="|",
+                            right=BinOp(
+                                left=Literal(kind="integer", value=2),
+                                op="^",
+                                right=Literal(kind="integer", value=1),
+                            ),
+                        ),
+                    ),
+                    Print(values=[Name(id="z")]),
+                ]),
+            )
+        ])
+        ir4 = IRCodeGen.generate(ast4)
+        print(ir4.format())
+
+        print("\n" + "="*50 + "\n")
+
+        # Prueba: operaciones unarias
+        # a = -10; b = !true; c = +5
+        ast5 = Program([
+            DeclInit(
+                name="main",
+                typ=FuncType(ret=VOID, params=[]),
+                init=Block(stmts=[
+                    DeclInit(
+                        name="a",
+                        typ=INT,
+                        init=UnaryOp(op="-", expr=Literal(kind="integer", value=10)),
+                    ),
+                    DeclInit(
+                        name="b",
+                        typ=BOOL,
+                        init=UnaryOp(op="!", expr=Literal(kind="boolean", value=True)),
+                    ),
+                    DeclInit(
+                        name="c",
+                        typ=INT,
+                        init=UnaryOp(op="+", expr=Literal(kind="integer", value=5)),
+                    ),
+                    Print(values=[Name(id="a"), Name(id="b"), Name(id="c")]),
+                ]),
+            )
+        ])
+        ir5 = IRCodeGen.generate(ast5)
+        print(ir5.format())

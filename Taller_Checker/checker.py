@@ -462,6 +462,13 @@ class Checker(Visitor):
 	def visit_Continue(self, n):
 		pass
 
+def semantic_check(txt):
+	from parser import parse
+	ast = parse(txt)
+	checker = Checker.check(ast)
+	return checker.ok(), checker.errors, ast
+
+
 if __name__ == "__main__":
     import sys
     from parser import parse
