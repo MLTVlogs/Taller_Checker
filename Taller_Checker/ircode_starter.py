@@ -432,20 +432,29 @@ class IRCodeGen(Visitor):
 
         Ya resuelto:
         - asignación simple a variables: x = expr
-
-        Ejercicio para estudiantes:
         - asignación a Index (arreglos)
-        - impedir escritura en constantes (si desean reforzarlo aquí)
         """
-        if not isinstance(node.target, Name):
-            raise NotImplementedError(
-                "Starter: Assign solo soporta Name (variables simples) por ahora"
-            )
+        if isinstance(node.target, Name):
+            storage = self.lookup(node.target.id)
+            src = self.visit(node.value)
+            self.emit(self.store_opcode(storage.ty), src, storage.name)
 
-        storage = self.lookup(node.target.id)
-        src = self.visit(node.value)
-        self.emit(self.store_opcode(storage.ty), src, storage.name)
+        elif isinstance(node.target, Index):
+            # Obtener nombre del arreglo
+            array_name = node.target.base.id
 
+            # Evaluar TODOS los índices
+            index_regs = []
+            for index_expr in node.target.indices:
+                index_reg = self.visit(index_expr)
+                index_regs.append(index_reg)
+
+            # Evaluar el valor a asignar
+            value_reg = self.visit(node.value)
+
+            # Emitir STOREARR con TODOS los índices
+            self.emit("STOREARR", array_name, *index_regs, value_reg)
+            
     def visit_Print(self, node):
         for expr in node.values:
             reg = self.visit(expr)
@@ -508,7 +517,6 @@ class IRCodeGen(Visitor):
         #deonde se sale
         self.emit("LABEL", label_end)
 
-
     def visit_Return(self, node):
         if node.value is None:
             self.emit("RET")
@@ -528,9 +536,21 @@ class IRCodeGen(Visitor):
         return tmp
 
     def visit_Index(self, node):
-        raise NotImplementedError(
-            "TODO estudiante: implementar acceso a arreglos (Index)"
-        )
+        #nombre base del arreglo
+        array_name = node.base.id
+        
+        #sacar indices
+        index_regs = []
+        for index_expr in node.indices:
+            index_reg = self.visit(index_expr)
+            index_regs.append(index_reg)
+        
+        out = self.new_temp()
+        
+        #sacra de los indices y poner en out
+        self.emit("LOADARR", array_name, *index_regs, out)
+        
+        return out
 
     def visit_Call(self, node):
         raise NotImplementedError(
@@ -547,9 +567,9 @@ class IRCodeGen(Visitor):
         - comparaciones == != < <= > >= (:DDDDDDDDDD)
         - operaciones bit a bit se supone (no? solo es conectarlo con lo que ya habia)
         - booleanos lógicos (&& y ||) (la ia si le sabia, yo soy el idiota que no vio que eso ya estaba definido mas arriba)
+        - cortocircuito real para && y ||
 
         Pendiente:
-        - cortocircuito real para && y ||
         - strings
         """
         left_reg = self.visit(node.left)
@@ -574,24 +594,38 @@ class IRCodeGen(Visitor):
             return out
         
         if node.op in {"&&", "||"}:
-            opcode = "AND" if node.op == "&&" else "OR"
-
             left_bool = self.new_temp()
             right_bool = self.new_temp()
+            label_end = self.new_label()
+            do_right = self.new_label()
 
-            #guarda el resultaddo de cada uno de los lados de la operacion en un registro aparte
-            self.emit("CMPI !=", left_reg, 0, left_bool)
-            self.emit("CMPI !=", right_reg, 0, right_bool)
+            if node.op == "&&":
+                self.emit("CMPI !=", left_reg, 0, left_bool)
+                self.emit("MOVI", left_bool, out)#movi en caso de que el resultado de la parte izquierda sea 0 out temporal
 
-            #y ahora compara esas 2 vainas para guardar en otro registro el resultado de las 2 cosas
-            self.emit(opcode, left_bool, right_bool, out)
+                #si lef_bool es 0 entonces saltamos a label_end para hacer el cortocircuito
+                self.emit("CBRANCH", left_bool, label_end)
+
+                self.emit("CMPI !=", right_reg, 0, right_bool)
+                self.emit("AND", left_bool, right_bool, out) #ya aca si ncomparacion normal y se escribe el out final
+
+                self.emit("LABEL", label_end)
+
+            elif node.op == "||":
+                self.emit("CMPI !=", left_reg, 0, left_bool)
+                self.emit("MOVI", left_bool, out)
+
+                #si left bool es 0 entonces revisamos el otro, si no entonces saltamos al final porque si es 1 entonces ya es true todo
+                self.emit("CBRANCH", left_bool, do_right)
+                self.emit("BRANCH", label_end)
+
+                self.emit("LABEL", do_right)
+                self.emit("CMPI !=", right_reg, 0, right_bool)
+                self.emit("OR", left_bool, right_bool, out) #verifica todo (innecesario segun chayi pero asi se entiende mas facil)
+
+                self.emit("LABEL", label_end)
+
             return out
-
-
-
-        raise NotImplementedError(
-            f"TODO estudiante: completar BinOp para operador {node.op!r} (aun falta cortocircuito)"
-        )
 
     def visit_UnaryOp(self, node):
         expr_reg = self.visit(node.expr)
@@ -647,8 +681,28 @@ class IRCodeGen(Visitor):
         raise NotImplementedError("TODO estudiante: implementar clases")
 
     def visit_TernOp(self, node):
-        """Visita un operador ternario."""
-        raise NotImplementedError("TODO estudiante: implementar operador ternario")
+        label_else = self.new_label()
+        label_end = self.new_label()
+        out = self.new_temp()
+        
+        cond = self.visit(node.cond)
+        self.emit("CBRANCH", cond, label_else)
+        
+        #true
+        true_val = self.visit(node.then)
+        
+        true_ty = self.infer_type(node.then)
+        self.emit(self.move_opcode(true_ty), true_val, out)
+        self.emit("BRANCH", label_end)
+        
+        #false
+        self.emit("LABEL", label_else)
+        false_val = self.visit(node.otherwise)
+        false_ty = self.infer_type(node.otherwise)
+        self.emit(self.move_opcode(false_ty), false_val, out)
+        
+        self.emit("LABEL", label_end)
+        return out
 
     def visit_MemberCall(self, node):
         """Visita una llamada a miembro."""
@@ -892,3 +946,152 @@ if __name__ == "__main__":
         ])
         ir7 = IRCodeGen.generate(ast7)
         print(ir7.format())
+
+        print("\n" + "="*50 + "\n")
+
+        # Prueba: if, while y for
+        # if (x > 5) { print(1); } else { print(0); }
+        # while (y < 10) { y++; }
+        # for (i = 0; i < 3; i++) { print(i); }
+        ast8 = Program([
+            DeclInit(
+                name="main",
+                typ=FuncType(ret=VOID, params=[]),
+                init=Block(stmts=[
+                    DeclInit(
+                        name="x",
+                        typ=INT,
+                        init=Literal(kind="integer", value=10),
+                    ),
+                    DeclInit(
+                        name="y",
+                        typ=INT,
+                        init=Literal(kind="integer", value=0),
+                    ),
+                    # if (x > 5)
+                    If(
+                        cond=BinOp(
+                            left=Name(id="x"),
+                            op=">",
+                            right=Literal(kind="integer", value=5),
+                        ),
+                        then=Block(stmts=[
+                            Print(values=[Literal(kind="integer", value=1)]),
+                        ]),
+                        otherwise=Block(stmts=[
+                            Print(values=[Literal(kind="integer", value=0)]),
+                        ]),
+                    ),
+                    # while (y < 10) { y++; }
+                    While(
+                        cond=BinOp(
+                            left=Name(id="y"),
+                            op="<",
+                            right=Literal(kind="integer", value=10),
+                        ),
+                        body=Block(stmts=[
+                            ExprStmt(
+                                expr=PostfixOp(
+                                    expr=Name(id="y"),
+                                    op="++",
+                                )
+                            ),
+                        ]),
+                    ),
+                    # for (i = 0; i < 3; i++) { print(i); }
+                    For(
+                        init=Assign(
+                            target=Name(id="x"),
+                            value=Literal(kind="integer", value=0),
+                        ),
+                        cond=BinOp(
+                            left=Name(id="x"),
+                            op="<",
+                            right=Literal(kind="integer", value=3),
+                        ),
+                        step=ExprStmt(
+                            expr=PostfixOp(
+                                expr=Name(id="x"),
+                                op="++",
+                            )
+                        ),
+                        body=Block(stmts=[
+                            Print(values=[Name(id="x")]),
+                        ]),
+                    ),
+                ]),
+            )
+        ])
+        ir8 = IRCodeGen.generate(ast8)
+        print(ir8.format())
+
+        print("\n" + "="*50 + "\n")
+
+        # Prueba: arrays bidimensionales
+        # Simula: matriz[2][3]
+        # matriz[0][0] = 1
+        # matriz[1][2] = 5
+        # x = matriz[0][0]
+        # y = matriz[1][2]
+        ast9 = Program([
+            DeclTyped(
+                name="matriz",
+                typ=INT,
+            ),
+            DeclInit(
+                name="main",
+                typ=FuncType(ret=VOID, params=[]),
+                init=Block(stmts=[
+                    # matriz[0][0] = 1
+                    Assign(
+                        target=Index(
+                            base=Name(id="matriz"),
+                            indices=[
+                                Literal(kind="integer", value=0),
+                                Literal(kind="integer", value=0),
+                            ],
+                        ),
+                        value=Literal(kind="integer", value=1),
+                    ),
+                    # matriz[1][2] = 5
+                    Assign(
+                        target=Index(
+                            base=Name(id="matriz"),
+                            indices=[
+                                Literal(kind="integer", value=1),
+                                Literal(kind="integer", value=2),
+                            ],
+                        ),
+                        value=Literal(kind="integer", value=5),
+                    ),
+                    # x = matriz[0][0]
+                    DeclInit(
+                        name="x",
+                        typ=INT,
+                        init=Index(
+                            base=Name(id="matriz"),
+                            indices=[
+                                Literal(kind="integer", value=0),
+                                Literal(kind="integer", value=0),
+                            ],
+                        ),
+                    ),
+                    # y = matriz[1][2]
+                    DeclInit(
+                        name="y",
+                        typ=INT,
+                        init=Index(
+                            base=Name(id="matriz"),
+                            indices=[
+                                Literal(kind="integer", value=1),
+                                Literal(kind="integer", value=2),
+                            ],
+                        ),
+                    ),
+                    # print(x, y)
+                    Print(values=[Name(id="x"), Name(id="y")]),
+                ]),
+            )
+        ])
+        ir9 = IRCodeGen.generate(ast9)
+        print(ir9.format())
