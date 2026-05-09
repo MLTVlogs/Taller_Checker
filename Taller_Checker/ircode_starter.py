@@ -141,6 +141,11 @@ class IRCodeGen(Visitor):
         self.label_count = 0
         self.scopes: list[dict[str, Storage]] = []
 
+        self.string_count = 0
+        self.string_tabla = {}
+
+        self.loop_actual: Optional[tuple[str, str]] = None  # (label_break, label_continue)
+
     @classmethod
     def generate(cls, node: Program) -> IRProgram:
         gen = cls()
@@ -484,6 +489,8 @@ class IRCodeGen(Visitor):
         label_start = self.new_label()
         label_end = self.new_label()
 
+        self.loop_actual = (label_end, label_start, label_start)#label start sale en las 2 para el continue, porque pues no tiene steps
+
         #inicio del ciclo
         self.emit("LABEL", label_start)
         cond = self.visit(node.cond)
@@ -496,11 +503,16 @@ class IRCodeGen(Visitor):
         #si desde el inicio o al volver al inicio la condicion ya no se cumple pues se devuelve al label_end y se sale del ciclo
         self.emit("LABEL", label_end)
 
+        self.loop_actual = None
+
     def visit_For(self, node):
         if node.init: self.visit(node.init) #si tiene init lo ejecuta para guardar la variable
 
         label_start = self.new_label()
         label_end = self.new_label()
+        label_step = self.new_label() #para usar el continue ya que con flujo normar no es necesario
+
+        self.loop_actual = (label_end, label_start, label_step)
 
         self.emit("LABEL", label_start)
         if node.cond: #si tiene condicion la evalua y si no pues es un for infinito
@@ -510,12 +522,16 @@ class IRCodeGen(Visitor):
         #cosas del for
         self.visit(node.body)
 
+        self.emit("LABEL", label_step) #Continue
+
         #el incremento
         self.visit(node.step)
         self.emit("BRANCH", label_start)
 
         #deonde se sale
         self.emit("LABEL", label_end)
+
+        self.loop_actual = None
 
     def visit_Return(self, node):
         if node.value is None:
@@ -568,8 +584,6 @@ class IRCodeGen(Visitor):
         - operaciones bit a bit se supone (no? solo es conectarlo con lo que ya habia)
         - booleanos lógicos (&& y ||) (la ia si le sabia, yo soy el idiota que no vio que eso ya estaba definido mas arriba)
         - cortocircuito real para && y ||
-
-        Pendiente:
         - strings
         """
         left_reg = self.visit(node.left)
@@ -657,9 +671,22 @@ class IRCodeGen(Visitor):
         elif node.kind == "char":
             value = ord(node.value) if isinstance(node.value, str) else int(node.value)
             self.emit("MOVB", value, tmp)
-
         elif node.kind == "string":
-            raise NotImplementedError(f"TODO estudiante: implementar strings")
+            if node.value not in self.string_tabla:
+                #si no existe en la tabla significa que no hay lebel entonces lo creamos
+                string_lable = f"STR{self.string_count}"
+                self.string_tabla[node.value] = string_lable
+
+                #crea la etiqueta para guardar el string
+                self.emit(string_lable, repr(node.value))
+                self.string_count += 1
+
+
+            #si ya existia o si lo acaba de crear viene aqui y lo llama al igual que su direccion
+            string_lable = self.string_tabla[node.value]
+            self.emit("MOVI", string_lable, tmp)
+
+            
         else:
             raise NotImplementedError(f"Literal tipo {node.kind} no soportado")
         return tmp
@@ -670,11 +697,11 @@ class IRCodeGen(Visitor):
 
     def visit_Break(self, node):
         """Visita un statement break."""
-        raise NotImplementedError("TODO estudiante: implementar break")
+        self.emit("BRANCH", self.loop_actual[0])#si es breake llama directamente a label_end
 
     def visit_Continue(self, node):
         """Visita un statement continue."""
-        raise NotImplementedError("TODO estudiante: implementar continue")
+        self.emit("BRANCH", self.loop_actual[2])#si es continue llama a label_step
 
     def visit_ClassDecl(self, node):
         """Visita una declaración de clase."""
@@ -770,8 +797,8 @@ if __name__ == "__main__":
                 ]),
             )
         ])
-        #ir = IRCodeGen.generate(ast)
-        #print(ir.format())
+        ir = IRCodeGen.generate(ast)
+        print(ir.format())
         
         print("\n" + "="*50 + "\n")
         
@@ -785,8 +812,8 @@ if __name__ == "__main__":
                 ]),
             )
         ])
-        #ir2 = IRCodeGen.generate(ast2)
-        #print(ir2.format())
+        ir2 = IRCodeGen.generate(ast2)
+        print(ir2.format())
 
 
         #prueba: x = (12 == 34)
@@ -1095,3 +1122,54 @@ if __name__ == "__main__":
         ])
         ir9 = IRCodeGen.generate(ast9)
         print(ir9.format())
+
+
+        ast10 = Program([
+            DeclInit(
+                name="main",
+                typ=FuncType(ret=VOID, params=[]),
+                init=Block(stmts=[
+                    DeclTyped(name="i", typ=SimpleType("integer")),
+                    For(
+                        init=Assign(
+                            target=Name(id="i"),
+                            value=Literal(kind="integer", value=0),
+                        ),
+                        cond=BinOp(
+                            left=Name(id="i"),
+                            op="<",
+                            right=Literal(kind="integer", value=10),
+                        ),
+                        step=Assign(
+                            target=Name(id="i"),
+                            value=BinOp(
+                                left=Name(id="i"),
+                                op="+",
+                                right=Literal(kind="integer", value=1),
+                            ),
+                        ),
+                        body=Block(stmts=[
+                            If(
+                                cond=BinOp(
+                                    left=Name(id="i"),
+                                    op="==",
+                                    right=Literal(kind="integer", value=5),
+                                ),
+                                then=Continue(),
+                            ),
+                            If(
+                                cond=BinOp(
+                                    left=Name(id="i"),
+                                    op="==",
+                                    right=Literal(kind="integer", value=8),
+                                ),
+                                then=Break(),
+                            ),
+                            Print(values=[Name(id="i")]),
+                        ]),
+                    ),
+                ]),
+            )
+        ])
+        ir10 = IRCodeGen.generate(ast10)
+        print(ir10.format())
