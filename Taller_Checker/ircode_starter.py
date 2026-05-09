@@ -453,19 +453,61 @@ class IRCodeGen(Visitor):
             self.emit(self.print_opcode(ty), reg)
 
     def visit_If(self, node):
-        raise NotImplementedError(
-            "TODO estudiante: generar labels y branches para If"
-        )
+        label_else = self.new_label()
+        label_end = self.new_label()
+
+        cond = self.visit(node.cond)
+
+        self.emit("CBRANCH", cond, label_else)
+
+        #if verdadero
+        self.visit(node.then)
+        self.emit("BRANCH", label_end)
+
+        #if falso (else)
+        self.emit("LABEL", label_else)
+        if node.otherwise: self.visit(node.otherwise) #(porque como es opcional se debe verificar)
+
+        #salida del if
+        self.emit("LABEL", label_end)
 
     def visit_While(self, node):
-        raise NotImplementedError(
-            "TODO estudiante: generar labels y branches para While"
-        )
+        label_start = self.new_label()
+        label_end = self.new_label()
+
+        #inicio del ciclo
+        self.emit("LABEL", label_start)
+        cond = self.visit(node.cond)
+        self.emit("CBRANCH", cond, label_end)
+
+        #hace lo que sea que tenga el cuerp y luego lo devuelve al inicio
+        self.visit(node.body)
+        self.emit("BRANCH", label_start)
+
+        #si desde el inicio o al volver al inicio la condicion ya no se cumple pues se devuelve al label_end y se sale del ciclo
+        self.emit("LABEL", label_end)
 
     def visit_For(self, node):
-        raise NotImplementedError(
-            "TODO estudiante: generar labels y branches para For"
-        )
+        if node.init: self.visit(node.init) #si tiene init lo ejecuta para guardar la variable
+
+        label_start = self.new_label()
+        label_end = self.new_label()
+
+        self.emit("LABEL", label_start)
+        if node.cond: #si tiene condicion la evalua y si no pues es un for infinito
+            cond = self.visit(node.cond)
+            self.emit("CBRANCH", cond, label_end)
+
+        #cosas del for
+        self.visit(node.body)
+
+        #el incremento
+        self.visit(node.step)
+        self.emit("BRANCH", label_start)
+
+        #deonde se sale
+        self.emit("LABEL", label_end)
+
 
     def visit_Return(self, node):
         if node.value is None:
@@ -548,7 +590,7 @@ class IRCodeGen(Visitor):
 
 
         raise NotImplementedError(
-            f"TODO estudiante: completar BinOp para operador {node.op!r} (aun faltan booleanos lógicos y cortocircuito)"
+            f"TODO estudiante: completar BinOp para operador {node.op!r} (aun falta cortocircuito)"
         )
 
     def visit_UnaryOp(self, node):
@@ -569,7 +611,7 @@ class IRCodeGen(Visitor):
             return out
 
         raise NotImplementedError(
-            "TODO estudiante: implementar UnaryOp (+, -, !) (esto deberia de estar completamente resuelto, si sale esto estamos jodidos)"
+            "UnaryOp (+, -, !) (esto deberia de estar completamente resuelto, si sale esto estamos jodidos)"
         )
 
     def visit_Literal(self, node):
@@ -583,7 +625,7 @@ class IRCodeGen(Visitor):
             self.emit("MOVB", value, tmp)
 
         elif node.kind == "string":
-            raise NotImplementedError(f"Literal tipo {node.kind} no soportado u")
+            raise NotImplementedError(f"TODO estudiante: implementar strings")
         else:
             raise NotImplementedError(f"Literal tipo {node.kind} no soportado")
         return tmp
@@ -614,7 +656,24 @@ class IRCodeGen(Visitor):
 
     def visit_PostfixOp(self, node):
         """Visita un operador de postfijo."""
-        raise NotImplementedError("TODO estudiante: implementar operadores de postfijo")
+        if not isinstance(node.expr, Name): raise NotImplementedError("esto no deberia estar pasando porque el semantico lo hace")
+
+        variable = self.lookup(node.expr.id)
+
+        old_var = self.new_temp()
+        self.emit(self.load_opcode(variable.ty), variable.name, old_var)
+
+        out = self.new_temp()
+        if node.op== "++":
+            self.emit("ADDI", old_var, 1, out)
+        elif node.op == "--":
+            self.emit("SUBI", old_var, 1, out)
+        else:
+            raise NotImplementedError(f"Operador de postfijo no soportado: {node.op} (no deberia de aparecer porque el semantico ya lo verifica)")
+
+        self.emit(self.store_opcode(variable.ty), out, variable.name)
+
+        return out
 
     def visit_Constructor(self, node):
         """Visita un constructor."""
@@ -657,8 +716,8 @@ if __name__ == "__main__":
                 ]),
             )
         ])
-        ir = IRCodeGen.generate(ast)
-        print(ir.format())
+        #ir = IRCodeGen.generate(ast)
+        #print(ir.format())
         
         print("\n" + "="*50 + "\n")
         
@@ -672,8 +731,8 @@ if __name__ == "__main__":
                 ]),
             )
         ])
-        ir2 = IRCodeGen.generate(ast2)
-        print(ir2.format())
+        #ir2 = IRCodeGen.generate(ast2)
+        #print(ir2.format())
 
 
         #prueba: x = (12 == 34)
@@ -760,3 +819,76 @@ if __name__ == "__main__":
         ])
         ir5 = IRCodeGen.generate(ast5)
         print(ir5.format())
+
+        print("\n" + "="*50 + "\n")
+
+        # Prueba: comparaciones con >=
+        # x: integer = 10; y: integer = 5;
+        # result = x >= y
+        ast6 = Program([
+            DeclInit(
+                name="x",
+                typ=INT,
+                init=Literal(kind="integer", value=10),
+            ),
+            DeclInit(
+                name="y",
+                typ=INT,
+                init=Literal(kind="integer", value=5),
+            ),
+            DeclInit(
+                name="main",
+                typ=FuncType(ret=VOID, params=[]),
+                init=Block(stmts=[
+                    DeclInit(
+                        name="result",
+                        typ=BOOL,
+                        init=BinOp(
+                            left=Name(id="x"),
+                            op=">=",
+                            right=Name(id="y"),
+                        ),
+                    ),
+                    Print(values=[Name(id="result")]),
+                ]),
+            )
+        ])
+        ir6 = IRCodeGen.generate(ast6)
+        print(ir6.format())
+
+        print("\n" + "="*50 + "\n")
+
+        # Prueba: postfijos
+        ast7 = Program([
+            DeclInit(
+                name="main",
+                typ=FuncType(ret=VOID, params=[]),
+                init=Block(stmts=[
+                    DeclInit(
+                        name="x",
+                        typ=INT,
+                        init=Literal(kind="integer", value=1),
+                    ),
+                    DeclInit(
+                        name="y",
+                        typ=INT,
+                        init=Literal(kind="integer", value=2),
+                    ),
+                    ExprStmt(
+                        expr=PostfixOp(
+                            expr=Name(id="x"),
+                            op="++",
+                        )
+                    ),
+                    ExprStmt(
+                        expr=PostfixOp(
+                            expr=Name(id="y"),
+                            op="--",
+                        )
+                    ),
+                    Print(values=[Name(id="x"), Name(id="y")]),
+                ]),
+            )
+        ])
+        ir7 = IRCodeGen.generate(ast7)
+        print(ir7.format())
