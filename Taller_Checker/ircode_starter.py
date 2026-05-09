@@ -416,8 +416,6 @@ class IRCodeGen(Visitor):
         self.current_function = prev_fn
         self.current_return_type = prev_ret
 
-
-
     def visit_Block(self, node):
         self.push_scope()
         for stmt in node.stmts:
@@ -568,11 +566,6 @@ class IRCodeGen(Visitor):
         
         return out
 
-    def visit_Call(self, node):
-        raise NotImplementedError(
-            "TODO estudiante: implementar evaluación de argumentos y CALL"
-        )
-
     def visit_BinOp(self, node):
         """
         Implementación al 50%.
@@ -703,9 +696,16 @@ class IRCodeGen(Visitor):
         """Visita un statement continue."""
         self.emit("BRANCH", self.loop_actual[2])#si es continue llama a label_step
 
-    def visit_ClassDecl(self, node):
-        """Visita una declaración de clase."""
-        raise NotImplementedError("TODO estudiante: implementar clases")
+    def visit_Call(self, node):
+        """Visita una llamada a función simple."""
+        arg_regs = []
+        for arg in getattr(node, 'args', []):
+            arg_reg = self.visit(arg)
+            arg_regs.append(arg_reg)
+
+        out = self.new_temp()
+        self.emit("CALL", node.func, *arg_regs, out)
+        return out
 
     def visit_TernOp(self, node):
         label_else = self.new_label()
@@ -731,10 +731,6 @@ class IRCodeGen(Visitor):
         self.emit("LABEL", label_end)
         return out
 
-    def visit_MemberCall(self, node):
-        """Visita una llamada a miembro."""
-        raise NotImplementedError("TODO estudiante: implementar llamadas a miembros")
-
     def visit_PostfixOp(self, node):
         """Visita un operador de postfijo."""
         if not isinstance(node.expr, Name): raise NotImplementedError("esto no deberia estar pasando porque el semantico lo hace")
@@ -755,6 +751,39 @@ class IRCodeGen(Visitor):
         self.emit(self.store_opcode(variable.ty), out, variable.name)
 
         return out
+
+    #clases y metodos y todo eso
+
+    def visit_ClassDecl(self, node):
+        """Visita una declaración de clase."""
+        raise NotImplementedError("TODO estudiante: implementar clases")
+
+    def visit_MemberCall(self, node):
+        """Visita una llamada a método/miembro."""
+        self.visit(node.target)
+
+        target_name = node.target.id if isinstance(node.target, Name) else "expr"
+
+        for member in node.members:
+            if isinstance(member, Name):
+                target_name = f"{target_name}.{member.id}"
+                continue
+
+            if isinstance(member, Index):
+                index_regs = [self.visit(idx) for idx in member.indices]
+                target_name = f"{target_name}[{','.join(str(r) for r in index_regs)}]"
+                continue
+
+            if isinstance(member, Call):
+                arg_regs = [self.visit(arg) for arg in getattr(member, 'args', []) or []]
+                out = self.new_temp()
+                self.emit("CALL", f"{target_name}.{member.func}", *arg_regs, out)
+                return out
+
+            raise NotImplementedError("MemberCall member type no soportado")
+
+        # Si no hay un Call dentro de la cadena de miembros, devolvemos el valor del target.
+        return self.visit(node.target)
 
     def visit_Constructor(self, node):
         """Visita un constructor."""
@@ -815,6 +844,7 @@ if __name__ == "__main__":
         ir2 = IRCodeGen.generate(ast2)
         print(ir2.format())
 
+        print("\n" + "="*50 + "\n")
 
         #prueba: x = (12 == 34)
         ast3 = Program([
@@ -1123,6 +1153,7 @@ if __name__ == "__main__":
         ir9 = IRCodeGen.generate(ast9)
         print(ir9.format())
 
+        print("\n" + "="*50 + "\n")
 
         ast10 = Program([
             DeclInit(
@@ -1173,3 +1204,76 @@ if __name__ == "__main__":
         ])
         ir10 = IRCodeGen.generate(ast10)
         print(ir10.format())
+
+        print("\n" + "="*50 + "\n")
+
+        # Prueba: llamadas Call y MemberCall
+        ast11 = Program([
+            DeclInit(
+                name="foo",
+                typ=FuncType(ret=INT, params=[
+                    Param(name="a", typ=INT),
+                    Param(name="b", typ=INT),
+                ]),
+                init=Block(stmts=[
+                    Return(
+                        value=BinOp(
+                            left=Name(id="a"),
+                            op="+",
+                            right=Name(id="b"),
+                        )
+                    ),
+                ]),
+            ),
+            DeclInit(
+                name="bar",
+                typ=FuncType(ret=INT, params=[Param(name="x", typ=INT)]),
+                init=Block(stmts=[
+                    Return(
+                        value=BinOp(
+                            left=Name(id="x"),
+                            op="*",
+                            right=Literal(kind="integer", value=2),
+                        )
+                    ),
+                ]),
+            ),
+            DeclInit(
+                name="main",
+                typ=FuncType(ret=VOID, params=[]),
+                init=Block(stmts=[
+                    DeclInit(
+                        name="sum",
+                        typ=INT,
+                        init=Call(
+                            func="foo",
+                            args=[
+                                Literal(kind="integer", value=3),
+                                Literal(kind="integer", value=4),
+                            ],
+                        ),
+                    ),
+                    DeclInit(
+                        name="obj",
+                        typ=INT,
+                        init=Literal(kind="integer", value=0),
+                    ),
+                    DeclInit(
+                        name="result",
+                        typ=INT,
+                        init=MemberCall(
+                            target=Name(id="obj"),
+                            members=[
+                                Call(
+                                    func="bar",
+                                    args=[Literal(kind="integer", value=5)],
+                                ),
+                            ],
+                        ),
+                    ),
+                    Print(values=[Name(id="sum"), Name(id="result")]),
+                ]),
+            ),
+        ])
+        ir11 = IRCodeGen.generate(ast11)
+        print(ir11.format())
