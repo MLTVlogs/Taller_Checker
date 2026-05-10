@@ -97,12 +97,13 @@ class Symtab:
 		- Si existe sólo en padres, se permite *sombrar* (shadowing).
 		'''
 		if name in self._map:
-			# chequeo de conflictos como el original
 			existing = self._map[name]
 			if self._type_of(existing) != self._type_of(value):
 				raise Symtab.SymbolConflictError(f"Conflicto: '{name}' ya definido con tipo distinto en scope '{self.name}'")
+			
 			else:
 				raise Symtab.SymbolDefinedError(f"Redefinición: '{name}' ya definido en scope '{self.name}'")
+			
 		self._map[name] = value
 		return value
 		

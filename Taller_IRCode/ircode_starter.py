@@ -1,10 +1,29 @@
 from __future__ import annotations
+#IMPORTANTE!!!!!!!!!!!!!! todo esta escrito de la forma **opcode reg1 reg2 destino** no confundir el orden porque si no queda mal hecho todo esto
+#el orden viene desde la plantilla del profesor
 
 from dataclasses import dataclass, field
 from typing import Optional
 from rich import print
 
 from model import *
+from checker import *
+
+# ===================================================
+# Type constants
+# ===================================================
+# Definir constantes de tipos comunes para IRCodeGen
+VOID = SimpleType('void')
+INT = SimpleType('integer')
+BOOL = SimpleType('boolean')
+CHAR = SimpleType('char')
+STRING = SimpleType('string')
+
+# Aliases para compatibilidad
+IntegerType = SimpleType
+BooleanType = SimpleType
+CharType = SimpleType
+VoidType = SimpleType
 
 # ===================================================
 # IR model
@@ -91,18 +110,20 @@ class IRCodeGen(Visitor):
     - scopes y lookup de símbolos
     - declaración de variables y constantes
     - carga de literales enteros, booleanos y chars
-    - lectura de variables (VarLoc)
+    - lectura de variables (Name)
     - impresión simple
     - retorno simple
     - parte de la selección de opcodes
 
-    Pendiente para estudiantes:
-    - completar BinOp
     - completar UnaryOp
-    - completar Assignment compuesto
-    - completar IfStmt / WhileStmt / ForStmt
-    - completar FuncCall
-    - arreglos y strings
+    - completar BinOp
+
+    
+    Pendiente para estudiantes:
+    - completar Assign compuesto
+    - completar If / While / For
+    - completar Call
+    - arreglos (Index) y strings
     - conversiones adicionales y mejoras del IR
 
     Sugerencia pedagógica:
@@ -120,11 +141,26 @@ class IRCodeGen(Visitor):
         self.label_count = 0
         self.scopes: list[dict[str, Storage]] = []
 
+        self.string_count = 0
+        self.string_tabla = {}
+
+        self.loop_actual: Optional[tuple[str, str]] = None  # (label_break, label_continue)
+
     @classmethod
     def generate(cls, node: Program) -> IRProgram:
         gen = cls()
         gen.visit(node)
         return gen.program
+
+    def visit(self, node):
+        """Dispatcher que redirige a visit_<NombreDelNodo> según el tipo."""
+        if node is None:
+            return None
+        method_name = f"visit_{node.__class__.__name__}"
+        method = getattr(self, method_name, None)
+        if method is None:
+            raise NotImplementedError(f"No visitor para {node.__class__.__name__}")
+        return method(node)
 
     # -------------------------------------------------
     # helpers básicos
@@ -171,20 +207,24 @@ class IRCodeGen(Visitor):
         if node is None:
             return VOID
 
-        ty = getattr(node, "type", None)
+        # Intentar obtener tipo del atributo "typ" o "type"
+        ty = getattr(node, "typ", None)
+        if ty is None:
+            ty = getattr(node, "type", None)
         if isinstance(ty, Type):
             return ty
 
-        if isinstance(node, IntegerLiteral):
-            return INT
-        if isinstance(node, BooleanLiteral):
-            return BOOL
-        if isinstance(node, CharLiteral):
-            return CHAR
-        if isinstance(node, StringLiteral):
-            return STRING
-        if isinstance(node, (VarDecl, ConstDecl, Param)):
-            return node.type
+        if isinstance(node, Literal):
+            if node.kind == "integer":
+                return INT
+            elif node.kind == "boolean":
+                return BOOL
+            elif node.kind == "char":
+                return CHAR
+            elif node.kind == "string":
+                return STRING
+        if isinstance(node, (DeclTyped, DeclInit, Param)):
+            return node.typ
 
         # Valor por defecto conservador para no bloquear pruebas tempranas.
         return INT
@@ -234,6 +274,20 @@ class IRCodeGen(Visitor):
         if oper not in table:
             raise NotImplementedError(f"Aritmética no soportada: {oper}")
         return table[oper]
+    
+    def binary_cmp_opcode(self, oper: str, ty: Type) -> str:
+        suffix = self.type_suffix(ty)
+        table = {
+            "==": f"CMP{suffix} ==",
+            "!=": f"CMP{suffix} !=",
+            "<": f"CMP{suffix} <",
+            "<=": f"CMP{suffix} <=",
+            ">": f"CMP{suffix} >",
+            ">=": f"CMP{suffix} >=",
+        }
+        if oper not in table:
+            raise NotImplementedError(f"Comparación no soportada: {oper}")
+        return table[oper]
 
     def binary_bit_opcode(self, oper: str, ty: Type) -> str:
         table = {
@@ -249,21 +303,25 @@ class IRCodeGen(Visitor):
     # programa y declaraciones
     # -------------------------------------------------
 
-    def visit(self, node: Program):
+    def visit_Program(self, node):
         self.push_scope()
 
         # Primera pasada: registrar nombres globales.
         for decl in node.decls:
-            if isinstance(decl, (VarDecl, ConstDecl)):
-                self.bind(
-                    Storage(
-                        decl.name,
-                        decl.type,
-                        is_global=True,
-                        is_const=isinstance(decl, ConstDecl),
+            if isinstance(decl, (DeclTyped, DeclInit)):
+                # Si es una función (DeclInit con typ=FuncType), registrarla apropiadamente
+                if isinstance(decl.typ, FuncType):
+                    self.bind(Storage(decl.name, decl.typ, is_global=True))
+                else:
+                    self.bind(
+                        Storage(
+                            decl.name,
+                            decl.typ,
+                            is_global=True,
+                            is_const=isinstance(decl, DeclInit) and hasattr(decl, 'is_const'),
+                        )
                     )
-                )
-            elif isinstance(decl, FuncDecl):
+            elif hasattr(decl, 'type') and isinstance(decl.type, FuncType):
                 self.bind(Storage(decl.name, decl.type, is_global=True))
 
         # Segunda pasada: generar IR real.
@@ -273,54 +331,54 @@ class IRCodeGen(Visitor):
         self.pop_scope()
         return self.program
 
-    def visit(self, node: VarDecl):
+    def visit_DeclTyped(self, node):
         if self.current_function is None:
-            self.emit(self.var_opcode(node.type), node.name)
-            if node.value is not None:
-                src = self.visit(node.value)
-                self.emit(self.store_opcode(node.type), src, node.name)
+            self.emit(self.var_opcode(node.typ), node.name)
             return
 
-        self.bind(Storage(node.name, node.type, is_const=not node.mutable))
-        self.emit(self.alloc_opcode(node.type), node.name)
-        if node.value is not None:
-            src = self.visit(node.value)
-            self.emit(self.store_opcode(node.type), src, node.name)
+        self.bind(Storage(node.name, node.typ, is_const=False))
+        self.emit(self.alloc_opcode(node.typ), node.name)
 
-    def visit(self, node: ConstDecl):
+    def visit_DeclInit(self, node):
+        # Si es una función, procesarla como tal
+        if isinstance(node.typ, FuncType):
+            return self._visit_function(node)
+        
+        # Si no, procesarla como una variable con inicialización
         if self.current_function is None:
-            self.emit(self.var_opcode(node.type), node.name)
-            src = self.visit(node.value)
-            self.emit(self.store_opcode(node.type), src, node.name)
+            self.emit(self.var_opcode(node.typ), node.name)
+            src = self.visit(node.init)
+            self.emit(self.store_opcode(node.typ), src, node.name)
             return
 
-        self.bind(Storage(node.name, node.type, is_const=True))
-        self.emit(self.alloc_opcode(node.type), node.name)
-        src = self.visit(node.value)
-        self.emit(self.store_opcode(node.type), src, node.name)
+        self.bind(Storage(node.name, node.typ, is_const=False))
+        self.emit(self.alloc_opcode(node.typ), node.name)
+        src = self.visit(node.init)
+        self.emit(self.store_opcode(node.typ), src, node.name)
 
-    def visit(self, node: FuncDecl):
+    def _visit_function(self, node):
+        """Procesa una declaración de función (como DeclInit con typ=FuncType)."""
         prev_fn = self.current_function
         prev_ret = self.current_return_type
 
         fn = IRFunction(
             name=node.name,
-            params=[(p.name, p.type) for p in node.parms.params],
-            return_type=node.type,
+            params=[(p.name, p.typ) for p in node.typ.params],
+            return_type=node.typ.ret,
         )
         self.program.functions.append(fn)
         self.current_function = fn
-        self.current_return_type = node.type
+        self.current_return_type = node.typ.ret
 
         self.push_scope()
-        for p in node.parms.params:
-            self.bind(Storage(p.name, p.type, is_param=True))
-            self.emit(self.alloc_opcode(p.type), p.name)
+        for p in node.typ.params:
+            self.bind(Storage(p.name, p.typ, is_param=True))
+            self.emit(self.alloc_opcode(p.typ), p.name)
 
-        self.visit(node.body)
+        self.visit(node.init)  # node.init es el Block del cuerpo
 
         # Soporte mínimo para funciones void.
-        if isinstance(node.type, VoidType):
+        if isinstance(node.typ.ret, VoidType) or (hasattr(node.typ.ret, 'name') and node.typ.ret.name == 'void'):
             if not fn.instructions or fn.instructions[-1][0] != "RET":
                 self.emit("RET")
 
@@ -328,154 +386,408 @@ class IRCodeGen(Visitor):
         self.current_function = prev_fn
         self.current_return_type = prev_ret
 
-    def visit(self, node: Block):
+    def visit_FuncDecl(self, node):
+        """Visita una declaración de función (FuncDecl)."""
+        prev_fn = self.current_function
+        prev_ret = self.current_return_type
+
+        fn = IRFunction(
+            name=node.name,
+            params=[(p.name, p.typ) for p in node.params],
+            return_type=node.typ,
+        )
+        self.program.functions.append(fn)
+        self.current_function = fn
+        self.current_return_type = node.typ
+
+        self.push_scope()
+        for p in node.params:
+            self.bind(Storage(p.name, p.typ, is_param=True))
+            self.emit(self.alloc_opcode(p.typ), p.name)
+
+        self.visit(node.body)
+
+        # Soporte mínimo para funciones void.
+        if isinstance(node.typ, VoidType):
+            if not fn.instructions or fn.instructions[-1][0] != "RET":
+                self.emit("RET")
+
+        self.pop_scope()
+        self.current_function = prev_fn
+        self.current_return_type = prev_ret
+
+    def visit_Block(self, node):
         self.push_scope()
         for stmt in node.stmts:
             self.visit(stmt)
         self.pop_scope()
 
-    def visit(self, node: ParamList):
-        return None
-
-    def visit(self, node: Param):
+    def visit_Param(self, node):
         return None
 
     # -------------------------------------------------
     # statements
     # -------------------------------------------------
 
-    def visit(self, node: Assignment):
+    def visit_Assign(self, node):
         """
         Implementación parcial.
 
         Ya resuelto:
         - asignación simple a variables: x = expr
-
-        Ejercicio para estudiantes:
-        - x += expr, x -= expr, ...
-        - asignación a ArrayLoc
-        - impedir escritura en constantes (si desean reforzarlo aquí)
+        - asignación a Index (arreglos)
         """
-        if not isinstance(node.loc, VarLoc):
-            raise NotImplementedError(
-                "Starter: Assignment solo soporta VarLoc por ahora"
-            )
-
-        storage = self.lookup(node.loc.name)
-
-        if node.oper == "=":
-            src = self.visit(node.expr)
+        if isinstance(node.target, Name):
+            storage = self.lookup(node.target.id)
+            src = self.visit(node.value)
             self.emit(self.store_opcode(storage.ty), src, storage.name)
-            return
 
-        raise NotImplementedError(
-            "TODO estudiante: implementar asignaciones compuestas (+=, -=, ... )"
-        )
+        elif isinstance(node.target, Index):
+            # Obtener nombre del arreglo
+            array_name = node.target.base.id
 
-    def visit(self, node: PrintStmt):
-        reg = self.visit(node.expr)
-        ty = self.infer_type(node.expr)
-        self.emit(self.print_opcode(ty), reg)
+            # Evaluar TODOS los índices
+            index_regs = []
+            for index_expr in node.target.indices:
+                index_reg = self.visit(index_expr)
+                index_regs.append(index_reg)
 
-    def visit(self, node: IfStmt):
-        raise NotImplementedError(
-            "TODO estudiante: generar labels y branches para IfStmt"
-        )
+            # Evaluar el valor a asignar
+            value_reg = self.visit(node.value)
 
-    def visit(self, node: WhileStmt):
-        raise NotImplementedError(
-            "TODO estudiante: generar labels y branches para WhileStmt"
-        )
+            # Emitir STOREARR con TODOS los índices
+            self.emit("STOREARR", array_name, *index_regs, value_reg)
+            
+    def visit_Print(self, node):
+        for expr in node.values:
+            reg = self.visit(expr)
+            ty = self.infer_type(expr)
+            self.emit(self.print_opcode(ty), reg)
 
-    def visit(self, node: ForStmt):
-        raise NotImplementedError(
-            "TODO estudiante: generar labels y branches para ForStmt"
-        )
+    def visit_If(self, node):
+        label_else = self.new_label()
+        label_end = self.new_label()
 
-    def visit(self, node: ReturnStmt):
-        if node.expr is None:
+        cond = self.visit(node.cond)
+
+        self.emit("CBRANCH", cond, label_else)
+
+        #if verdadero
+        self.visit(node.then)
+        self.emit("BRANCH", label_end)
+
+        #if falso (else)
+        self.emit("LABEL", label_else)
+        if node.otherwise: self.visit(node.otherwise) #(porque como es opcional se debe verificar)
+
+        #salida del if
+        self.emit("LABEL", label_end)
+
+    def visit_While(self, node):
+        label_start = self.new_label()
+        label_end = self.new_label()
+
+        self.loop_actual = (label_end, label_start, label_start)#label start sale en las 2 para el continue, porque pues no tiene steps
+
+        #inicio del ciclo
+        self.emit("LABEL", label_start)
+        cond = self.visit(node.cond)
+        self.emit("CBRANCH", cond, label_end)
+
+        #hace lo que sea que tenga el cuerp y luego lo devuelve al inicio
+        self.visit(node.body)
+        self.emit("BRANCH", label_start)
+
+        #si desde el inicio o al volver al inicio la condicion ya no se cumple pues se devuelve al label_end y se sale del ciclo
+        self.emit("LABEL", label_end)
+
+        self.loop_actual = None
+
+    def visit_For(self, node):
+        if node.init: self.visit(node.init) #si tiene init lo ejecuta para guardar la variable
+
+        label_start = self.new_label()
+        label_end = self.new_label()
+        label_step = self.new_label() #para usar el continue ya que con flujo normar no es necesario
+
+        self.loop_actual = (label_end, label_start, label_step)
+
+        self.emit("LABEL", label_start)
+        if node.cond: #si tiene condicion la evalua y si no pues es un for infinito
+            cond = self.visit(node.cond)
+            self.emit("CBRANCH", cond, label_end)
+
+        #cosas del for
+        self.visit(node.body)
+
+        self.emit("LABEL", label_step) #Continue
+
+        #el incremento
+        self.visit(node.step)
+        self.emit("BRANCH", label_start)
+
+        #deonde se sale
+        self.emit("LABEL", label_end)
+
+        self.loop_actual = None
+
+    def visit_Return(self, node):
+        if node.value is None:
             self.emit("RET")
             return
 
-        reg = self.visit(node.expr)
+        reg = self.visit(node.value)
         self.emit("RET", reg)
 
     # -------------------------------------------------
     # expressions
     # -------------------------------------------------
 
-    def visit(self, node: VarLoc):
-        storage = self.lookup(node.name)
+    def visit_Name(self, node):
+        storage = self.lookup(node.id)
         tmp = self.new_temp()
         self.emit(self.load_opcode(storage.ty), storage.name, tmp)
         return tmp
 
-    def visit(self, node: ArrayLoc):
-        raise NotImplementedError(
-            "TODO estudiante: implementar acceso a arreglos"
-        )
+    def visit_Index(self, node):
+        #nombre base del arreglo
+        array_name = node.base.id
+        
+        #sacar indices
+        index_regs = []
+        for index_expr in node.indices:
+            index_reg = self.visit(index_expr)
+            index_regs.append(index_reg)
+        
+        out = self.new_temp()
+        
+        #sacra de los indices y poner en out
+        self.emit("LOADARR", array_name, *index_regs, out)
+        
+        return out
 
-    def visit(self, node: FuncCall):
-        raise NotImplementedError(
-            "TODO estudiante: implementar evaluación de argumentos y CALL"
-        )
-
-    def visit(self, node: BinOp):
+    def visit_BinOp(self, node):
         """
         Implementación al 50%.
 
         Ya resuelto:
         - esqueleto general
         - aritmética básica + - * /
-
-        Pendiente:
-        - comparaciones
-        - booleanos lógicos
-        - operaciones bit a bit
+        - comparaciones == != < <= > >= (:DDDDDDDDDD)
+        - operaciones bit a bit se supone (no? solo es conectarlo con lo que ya habia)
+        - booleanos lógicos (&& y ||) (la ia si le sabia, yo soy el idiota que no vio que eso ya estaba definido mas arriba)
         - cortocircuito real para && y ||
+        - strings
         """
         left_reg = self.visit(node.left)
         right_reg = self.visit(node.right)
         left_ty = self.infer_type(node.left)
+        right_ty = self.infer_type(node.right)
         out = self.new_temp()
 
-        if node.oper in {"+", "-", "*", "/"}:
-            opcode = self.binary_arith_opcode(node.oper, left_ty)
+        if node.op in {"+", "-", "*", "/"}:
+            opcode = self.binary_arith_opcode(node.op, left_ty)
             self.emit(opcode, left_reg, right_reg, out)
             return out
 
+        if node.op in {"==", "!=", "<", "<=", ">", ">="}:
+            opcode = self.binary_cmp_opcode(node.op, left_ty)
+            self.emit(opcode, left_reg, right_reg, out)
+            return out
+        
+        if node.op in {"&", "|", "^"}:
+            opcode = self.binary_bit_opcode(node.op, left_ty)
+            self.emit(opcode, left_reg, right_reg, out)
+            return out
+        
+        if node.op in {"&&", "||"}:
+            left_bool = self.new_temp()
+            right_bool = self.new_temp()
+            label_end = self.new_label()
+            do_right = self.new_label()
+
+            if node.op == "&&":
+                self.emit("CMPI !=", left_reg, 0, left_bool)
+                self.emit("MOVI", left_bool, out)#movi en caso de que el resultado de la parte izquierda sea 0 out temporal
+
+                #si lef_bool es 0 entonces saltamos a label_end para hacer el cortocircuito
+                self.emit("CBRANCH", left_bool, label_end)
+
+                self.emit("CMPI !=", right_reg, 0, right_bool)
+                self.emit("AND", left_bool, right_bool, out) #ya aca si ncomparacion normal y se escribe el out final
+
+                self.emit("LABEL", label_end)
+
+            elif node.op == "||":
+                self.emit("CMPI !=", left_reg, 0, left_bool)
+                self.emit("MOVI", left_bool, out)
+
+                #si left bool es 0 entonces revisamos el otro, si no entonces saltamos al final porque si es 1 entonces ya es true todo
+                self.emit("CBRANCH", left_bool, do_right)
+                self.emit("BRANCH", label_end)
+
+                self.emit("LABEL", do_right)
+                self.emit("CMPI !=", right_reg, 0, right_bool)
+                self.emit("OR", left_bool, right_bool, out) #verifica todo (innecesario segun chayi pero asi se entiende mas facil)
+
+                self.emit("LABEL", label_end)
+
+            return out
+
+    def visit_UnaryOp(self, node):
+        expr_reg = self.visit(node.expr)
+        expr_ty = self.infer_type(node.expr)
+        out = self.new_temp()
+
+        if node.op == "+":
+            self.emit(f"MOV{self.type_suffix(expr_ty)}", expr_reg, out)
+            return out
+        if node.op == "-":
+            zero = self.new_temp()
+            self.emit(f"MOV{self.type_suffix(expr_ty)}", 0, zero)
+            self.emit(f"SUB{self.type_suffix(expr_ty)}", zero, expr_reg, out)
+            return out
+        if node.op == "!":
+            self.emit(f"NOT{self.type_suffix(expr_ty)}", expr_reg, out)
+            return out
+
         raise NotImplementedError(
-            f"TODO estudiante: completar BinOp para operador {node.oper!r}"
+            "UnaryOp (+, -, !) (esto deberia de estar completamente resuelto, si sale esto estamos jodidos)"
         )
 
-    def visit(self, node: UnaryOp):
-        raise NotImplementedError(
-            "TODO estudiante: implementar UnaryOp (+, -, !)"
-        )
-
-    def visit(self, node: IntegerLiteral):
+    def visit_Literal(self, node):
         tmp = self.new_temp()
-        self.emit("MOVI", int(node.value), tmp)
+        if node.kind == "integer":
+            self.emit("MOVI", int(node.value), tmp)
+        elif node.kind == "boolean":
+            self.emit("MOVI", 1 if node.value else 0, tmp)
+        elif node.kind == "char":
+            value = ord(node.value) if isinstance(node.value, str) else int(node.value)
+            self.emit("MOVB", value, tmp)
+        elif node.kind == "string":
+            if node.value not in self.string_tabla:
+                #si no existe en la tabla significa que no hay lebel entonces lo creamos
+                string_lable = f"STR{self.string_count}"
+                self.string_tabla[node.value] = string_lable
+
+                #crea la etiqueta para guardar el string
+                self.emit(string_lable, repr(node.value))
+                self.string_count += 1
+
+
+            #si ya existia o si lo acaba de crear viene aqui y lo llama al igual que su direccion
+            string_lable = self.string_tabla[node.value]
+            self.emit("MOVI", string_lable, tmp)
+
+            
+        else:
+            raise NotImplementedError(f"Literal tipo {node.kind} no soportado")
         return tmp
 
-    def visit(self, node: BooleanLiteral):
-        tmp = self.new_temp()
-        self.emit("MOVI", 1 if node.value else 0, tmp)
-        return tmp
+    def visit_ExprStmt(self, node):
+        """Visita un statement de expresión."""
+        self.visit(node.expr)
 
-    def visit(self, node: CharLiteral):
-        tmp = self.new_temp()
-        value = ord(node.value) if isinstance(node.value, str) else int(node.value)
-        self.emit("MOVB", value, tmp)
-        return tmp
+    def visit_Break(self, node):
+        """Visita un statement break."""
+        self.emit("BRANCH", self.loop_actual[0])#si es breake llama directamente a label_end
 
-    def visit(self, node: StringLiteral):
-        raise NotImplementedError(
-            "TODO estudiante: decidir representación IR para strings"
-        )
+    def visit_Continue(self, node):
+        """Visita un statement continue."""
+        self.emit("BRANCH", self.loop_actual[2])#si es continue llama a label_step
 
-    def visit(self, node: ExprList):
-        return [self.visit(expr) for expr in node.exprs]
+    def visit_Call(self, node):
+        """Visita una llamada a función simple."""
+        arg_regs = []
+        for arg in getattr(node, 'args', []):
+            arg_reg = self.visit(arg)
+            arg_regs.append(arg_reg)
+
+        out = self.new_temp()
+        self.emit("CALL", node.func, *arg_regs, out)
+        return out
+
+    def visit_TernOp(self, node):
+        label_else = self.new_label()
+        label_end = self.new_label()
+        out = self.new_temp()
+        
+        cond = self.visit(node.cond)
+        self.emit("CBRANCH", cond, label_else)
+        
+        #true
+        true_val = self.visit(node.then)
+        
+        true_ty = self.infer_type(node.then)
+        self.emit(self.move_opcode(true_ty), true_val, out)
+        self.emit("BRANCH", label_end)
+        
+        #false
+        self.emit("LABEL", label_else)
+        false_val = self.visit(node.otherwise)
+        false_ty = self.infer_type(node.otherwise)
+        self.emit(self.move_opcode(false_ty), false_val, out)
+        
+        self.emit("LABEL", label_end)
+        return out
+
+    def visit_PostfixOp(self, node):
+        """Visita un operador de postfijo."""
+        if not isinstance(node.expr, Name): raise NotImplementedError("esto no deberia estar pasando porque el semantico lo hace")
+
+        variable = self.lookup(node.expr.id)
+
+        old_var = self.new_temp()
+        self.emit(self.load_opcode(variable.ty), variable.name, old_var)
+
+        out = self.new_temp()
+        if node.op== "++":
+            self.emit("ADDI", old_var, 1, out)
+        elif node.op == "--":
+            self.emit("SUBI", old_var, 1, out)
+        else:
+            raise NotImplementedError(f"Operador de postfijo no soportado: {node.op} (no deberia de aparecer porque el semantico ya lo verifica)")
+
+        self.emit(self.store_opcode(variable.ty), out, variable.name)
+
+        return out
+
+    #clases y metodos y todo eso
+
+    def visit_ClassDecl(self, node):
+        """Visita una declaración de clase."""
+        raise NotImplementedError("TODO estudiante: implementar clases")
+
+    def visit_MemberCall(self, node):
+        """Visita una llamada a método/miembro."""
+        self.visit(node.target)
+
+        target_name = node.target.id if isinstance(node.target, Name) else "expr"
+
+        for member in node.members:
+            if isinstance(member, Name):
+                target_name = f"{target_name}.{member.id}"
+                continue
+
+            if isinstance(member, Index):
+                index_regs = [self.visit(idx) for idx in member.indices]
+                target_name = f"{target_name}[{','.join(str(r) for r in index_regs)}]"
+                continue
+
+            if isinstance(member, Call):
+                arg_regs = [self.visit(arg) for arg in getattr(member, 'args', []) or []]
+                out = self.new_temp()
+                self.emit("CALL", f"{target_name}.{member.func}", *arg_regs, out)
+                return out
+
+            raise NotImplementedError("MemberCall member type no soportado")
+
+        # Si no hay un Call dentro de la cadena de miembros, devolvemos el valor del target.
+        return self.visit(node.target)
+
+    def visit_Constructor(self, node):
+        """Visita un constructor."""
+        raise NotImplementedError("TODO estudiante: implementar constructores")
 
 
 # ===================================================
@@ -483,32 +795,485 @@ class IRCodeGen(Visitor):
 # ===================================================
 
 if __name__ == "__main__":
-    # Demo pequeña para que los estudiantes prueben la plantilla.
-    ast = Program([
-        FuncDecl(
-            name="main",
-            parms=ParamList([]),
-            type=VOID,
-            body=Block([
-                VarDecl(
-                    name="x",
-                    type=INT,
-                    value=BinOp(
-                        oper="+",
-                        left=IntegerLiteral(2),
-                        right=BinOp(
-                            oper="*",
-                            left=IntegerLiteral(3),
-                            right=IntegerLiteral(4),
-                            type=INT,
-                        ),
-                        type=INT,
-                    ),
-                ),
-                PrintStmt(expr=VarLoc(name="x", type=INT)),
-            ]),
-        )
-    ])
+    import sys
 
-    ir = IRCodeGen.generate(ast)
-    print(ir.format())
+    if "-ir" in sys.argv:
+        filename = sys.argv[1]
+        with open(filename, encoding="utf-8") as f:
+            txt = f.read()
+            check = semantic_check(txt) #.ok(), lista de errores, ast
+
+            if check[0]: sys.exit(1) #si hubieron errores semanticos pues no ejecuta ni mierda
+
+            ir = IRCodeGen.generate()
+            print(ir.format())
+
+    else:
+        print("Demo de IRCodeGen con ejemplos simples si desea ejecutar codigo txt usar -ir:\n")
+        # msg: string = "Hola mundo";
+        # print(msg);
+        ast = Program([
+            DeclInit(
+                name="main",
+                typ=FuncType(ret=VOID, params=[]),
+                init=Block(stmts=[
+                    DeclInit(
+                        name="msg",
+                        typ=STRING,
+                        init=Literal(kind="string", value="Hola mundo"),
+                    ),
+                    Print(values=[Name(id="msg")]),
+                ]),
+            )
+        ])
+        ir = IRCodeGen.generate(ast)
+        print(ir.format())
+        
+        print("\n" + "="*50 + "\n")
+        
+        # Prueba: print("hola") directamente
+        ast2 = Program([
+            DeclInit(
+                name="main",
+                typ=FuncType(ret=VOID, params=[]),
+                init=Block(stmts=[
+                    Print(values=[Literal(kind="string", value="Hola mundo")]),
+                ]),
+            )
+        ])
+        ir2 = IRCodeGen.generate(ast2)
+        print(ir2.format())
+
+        print("\n" + "="*50 + "\n")
+
+        #prueba: x = (12 == 34)
+        ast3 = Program([
+            DeclInit(
+                name="main",
+                typ=FuncType(ret=VOID, params=[]),
+                init=Block(stmts=[
+                    DeclTyped(name="x", typ=BOOL),
+                    Assign(
+                        target=Name(id="x"),
+                        value=BinOp(
+                            left=Literal(kind="integer", value=12),
+                            op="==",
+                            right=Literal(kind="integer", value=34),
+                        )
+                    ),
+                ]),
+            )
+        ])
+        ir3 = IRCodeGen.generate(ast3)
+        print(ir3.format())
+
+        print("\n" + "="*50 + "\n")
+
+        # Prueba: operaciones bitwise
+        # z = (5 & 3) | (2 ^ 1)
+        ast4 = Program([
+            DeclInit(
+                name="main",
+                typ=FuncType(ret=VOID, params=[]),
+                init=Block(stmts=[
+                    DeclInit(
+                        name="z",
+                        typ=INT,
+                        init=BinOp(
+                            left=BinOp(
+                                left=Literal(kind="integer", value=5),
+                                op="&",
+                                right=Literal(kind="integer", value=3),
+                            ),
+                            op="|",
+                            right=BinOp(
+                                left=Literal(kind="integer", value=2),
+                                op="^",
+                                right=Literal(kind="integer", value=1),
+                            ),
+                        ),
+                    ),
+                    Print(values=[Name(id="z")]),
+                ]),
+            )
+        ])
+        ir4 = IRCodeGen.generate(ast4)
+        print(ir4.format())
+
+        print("\n" + "="*50 + "\n")
+
+        # Prueba: operaciones unarias
+        # a = -10; b = !true; c = +5
+        ast5 = Program([
+            DeclInit(
+                name="main",
+                typ=FuncType(ret=VOID, params=[]),
+                init=Block(stmts=[
+                    DeclInit(
+                        name="a",
+                        typ=INT,
+                        init=UnaryOp(op="-", expr=Literal(kind="integer", value=10)),
+                    ),
+                    DeclInit(
+                        name="b",
+                        typ=BOOL,
+                        init=UnaryOp(op="!", expr=Literal(kind="boolean", value=True)),
+                    ),
+                    DeclInit(
+                        name="c",
+                        typ=INT,
+                        init=UnaryOp(op="+", expr=Literal(kind="integer", value=5)),
+                    ),
+                    Print(values=[Name(id="a"), Name(id="b"), Name(id="c")]),
+                ]),
+            )
+        ])
+        ir5 = IRCodeGen.generate(ast5)
+        print(ir5.format())
+
+        print("\n" + "="*50 + "\n")
+
+        # Prueba: comparaciones con >=
+        # x: integer = 10; y: integer = 5;
+        # result = x >= y
+        ast6 = Program([
+            DeclInit(
+                name="x",
+                typ=INT,
+                init=Literal(kind="integer", value=10),
+            ),
+            DeclInit(
+                name="y",
+                typ=INT,
+                init=Literal(kind="integer", value=5),
+            ),
+            DeclInit(
+                name="main",
+                typ=FuncType(ret=VOID, params=[]),
+                init=Block(stmts=[
+                    DeclInit(
+                        name="result",
+                        typ=BOOL,
+                        init=BinOp(
+                            left=Name(id="x"),
+                            op=">=",
+                            right=Name(id="y"),
+                        ),
+                    ),
+                    Print(values=[Name(id="result")]),
+                ]),
+            )
+        ])
+        ir6 = IRCodeGen.generate(ast6)
+        print(ir6.format())
+
+        print("\n" + "="*50 + "\n")
+
+        # Prueba: postfijos
+        ast7 = Program([
+            DeclInit(
+                name="main",
+                typ=FuncType(ret=VOID, params=[]),
+                init=Block(stmts=[
+                    DeclInit(
+                        name="x",
+                        typ=INT,
+                        init=Literal(kind="integer", value=1),
+                    ),
+                    DeclInit(
+                        name="y",
+                        typ=INT,
+                        init=Literal(kind="integer", value=2),
+                    ),
+                    ExprStmt(
+                        expr=PostfixOp(
+                            expr=Name(id="x"),
+                            op="++",
+                        )
+                    ),
+                    ExprStmt(
+                        expr=PostfixOp(
+                            expr=Name(id="y"),
+                            op="--",
+                        )
+                    ),
+                    Print(values=[Name(id="x"), Name(id="y")]),
+                ]),
+            )
+        ])
+        ir7 = IRCodeGen.generate(ast7)
+        print(ir7.format())
+
+        print("\n" + "="*50 + "\n")
+
+        # Prueba: if, while y for
+        # if (x > 5) { print(1); } else { print(0); }
+        # while (y < 10) { y++; }
+        # for (i = 0; i < 3; i++) { print(i); }
+        ast8 = Program([
+            DeclInit(
+                name="main",
+                typ=FuncType(ret=VOID, params=[]),
+                init=Block(stmts=[
+                    DeclInit(
+                        name="x",
+                        typ=INT,
+                        init=Literal(kind="integer", value=10),
+                    ),
+                    DeclInit(
+                        name="y",
+                        typ=INT,
+                        init=Literal(kind="integer", value=0),
+                    ),
+                    # if (x > 5)
+                    If(
+                        cond=BinOp(
+                            left=Name(id="x"),
+                            op=">",
+                            right=Literal(kind="integer", value=5),
+                        ),
+                        then=Block(stmts=[
+                            Print(values=[Literal(kind="integer", value=1)]),
+                        ]),
+                        otherwise=Block(stmts=[
+                            Print(values=[Literal(kind="integer", value=0)]),
+                        ]),
+                    ),
+                    # while (y < 10) { y++; }
+                    While(
+                        cond=BinOp(
+                            left=Name(id="y"),
+                            op="<",
+                            right=Literal(kind="integer", value=10),
+                        ),
+                        body=Block(stmts=[
+                            ExprStmt(
+                                expr=PostfixOp(
+                                    expr=Name(id="y"),
+                                    op="++",
+                                )
+                            ),
+                        ]),
+                    ),
+                    # for (i = 0; i < 3; i++) { print(i); }
+                    For(
+                        init=Assign(
+                            target=Name(id="x"),
+                            value=Literal(kind="integer", value=0),
+                        ),
+                        cond=BinOp(
+                            left=Name(id="x"),
+                            op="<",
+                            right=Literal(kind="integer", value=3),
+                        ),
+                        step=ExprStmt(
+                            expr=PostfixOp(
+                                expr=Name(id="x"),
+                                op="++",
+                            )
+                        ),
+                        body=Block(stmts=[
+                            Print(values=[Name(id="x")]),
+                        ]),
+                    ),
+                ]),
+            )
+        ])
+        ir8 = IRCodeGen.generate(ast8)
+        print(ir8.format())
+
+        print("\n" + "="*50 + "\n")
+
+        # Prueba: arrays bidimensionales
+        # Simula: matriz[2][3]
+        # matriz[0][0] = 1
+        # matriz[1][2] = 5
+        # x = matriz[0][0]
+        # y = matriz[1][2]
+        ast9 = Program([
+            DeclTyped(
+                name="matriz",
+                typ=INT,
+            ),
+            DeclInit(
+                name="main",
+                typ=FuncType(ret=VOID, params=[]),
+                init=Block(stmts=[
+                    # matriz[0][0] = 1
+                    Assign(
+                        target=Index(
+                            base=Name(id="matriz"),
+                            indices=[
+                                Literal(kind="integer", value=0),
+                                Literal(kind="integer", value=0),
+                            ],
+                        ),
+                        value=Literal(kind="integer", value=1),
+                    ),
+                    # matriz[1][2] = 5
+                    Assign(
+                        target=Index(
+                            base=Name(id="matriz"),
+                            indices=[
+                                Literal(kind="integer", value=1),
+                                Literal(kind="integer", value=2),
+                            ],
+                        ),
+                        value=Literal(kind="integer", value=5),
+                    ),
+                    # x = matriz[0][0]
+                    DeclInit(
+                        name="x",
+                        typ=INT,
+                        init=Index(
+                            base=Name(id="matriz"),
+                            indices=[
+                                Literal(kind="integer", value=0),
+                                Literal(kind="integer", value=0),
+                            ],
+                        ),
+                    ),
+                    # y = matriz[1][2]
+                    DeclInit(
+                        name="y",
+                        typ=INT,
+                        init=Index(
+                            base=Name(id="matriz"),
+                            indices=[
+                                Literal(kind="integer", value=1),
+                                Literal(kind="integer", value=2),
+                            ],
+                        ),
+                    ),
+                    # print(x, y)
+                    Print(values=[Name(id="x"), Name(id="y")]),
+                ]),
+            )
+        ])
+        ir9 = IRCodeGen.generate(ast9)
+        print(ir9.format())
+
+        print("\n" + "="*50 + "\n")
+
+        ast10 = Program([
+            DeclInit(
+                name="main",
+                typ=FuncType(ret=VOID, params=[]),
+                init=Block(stmts=[
+                    DeclTyped(name="i", typ=SimpleType("integer")),
+                    For(
+                        init=Assign(
+                            target=Name(id="i"),
+                            value=Literal(kind="integer", value=0),
+                        ),
+                        cond=BinOp(
+                            left=Name(id="i"),
+                            op="<",
+                            right=Literal(kind="integer", value=10),
+                        ),
+                        step=Assign(
+                            target=Name(id="i"),
+                            value=BinOp(
+                                left=Name(id="i"),
+                                op="+",
+                                right=Literal(kind="integer", value=1),
+                            ),
+                        ),
+                        body=Block(stmts=[
+                            If(
+                                cond=BinOp(
+                                    left=Name(id="i"),
+                                    op="==",
+                                    right=Literal(kind="integer", value=5),
+                                ),
+                                then=Continue(),
+                            ),
+                            If(
+                                cond=BinOp(
+                                    left=Name(id="i"),
+                                    op="==",
+                                    right=Literal(kind="integer", value=8),
+                                ),
+                                then=Break(),
+                            ),
+                            Print(values=[Name(id="i")]),
+                        ]),
+                    ),
+                ]),
+            )
+        ])
+        ir10 = IRCodeGen.generate(ast10)
+        print(ir10.format())
+
+        print("\n" + "="*50 + "\n")
+
+        # Prueba: llamadas Call y MemberCall
+        ast11 = Program([
+            DeclInit(
+                name="foo",
+                typ=FuncType(ret=INT, params=[
+                    Param(name="a", typ=INT),
+                    Param(name="b", typ=INT),
+                ]),
+                init=Block(stmts=[
+                    Return(
+                        value=BinOp(
+                            left=Name(id="a"),
+                            op="+",
+                            right=Name(id="b"),
+                        )
+                    ),
+                ]),
+            ),
+            DeclInit(
+                name="bar",
+                typ=FuncType(ret=INT, params=[Param(name="x", typ=INT)]),
+                init=Block(stmts=[
+                    Return(
+                        value=BinOp(
+                            left=Name(id="x"),
+                            op="*",
+                            right=Literal(kind="integer", value=2),
+                        )
+                    ),
+                ]),
+            ),
+            DeclInit(
+                name="main",
+                typ=FuncType(ret=VOID, params=[]),
+                init=Block(stmts=[
+                    DeclInit(
+                        name="sum",
+                        typ=INT,
+                        init=Call(
+                            func="foo",
+                            args=[
+                                Literal(kind="integer", value=3),
+                                Literal(kind="integer", value=4),
+                            ],
+                        ),
+                    ),
+                    DeclInit(
+                        name="obj",
+                        typ=INT,
+                        init=Literal(kind="integer", value=0),
+                    ),
+                    DeclInit(
+                        name="result",
+                        typ=INT,
+                        init=MemberCall(
+                            target=Name(id="obj"),
+                            members=[
+                                Call(
+                                    func="bar",
+                                    args=[Literal(kind="integer", value=5)],
+                                ),
+                            ],
+                        ),
+                    ),
+                    Print(values=[Name(id="sum"), Name(id="result")]),
+                ]),
+            ),
+        ])
+        ir11 = IRCodeGen.generate(ast11)
+        print(ir11.format())

@@ -1,0 +1,16 @@
+/* Conditions */
+
+var: integer;
+
+main: function void () = {
+    if (12 == 0)
+        var++;
+    else
+        var--;
+
+    newvar: boolean;
+    if (newvar)
+        var++;
+    else
+        var--;
+}

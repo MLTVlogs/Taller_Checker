@@ -623,3 +623,5 @@ if __name__ == '__main__':
 			elif "-rich" in sys.argv:
 				tree = build_rich_tree(ast)
 				print(tree)
+			elif "-ast" in sys.argv:
+				print(ast)
