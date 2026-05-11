@@ -755,8 +755,26 @@ class IRCodeGen(Visitor):
     #clases y metodos y todo eso
 
     def visit_ClassDecl(self, node):
-        """Visita una declaración de clase."""
-        raise NotImplementedError("TODO estudiante: implementar clases")
+        """
+        Visita una declaración de clase.
+        
+        Una clase es esencialmente un contenedor de miembros (variables y métodos).
+        En el IR, emitimos:
+        1. Etiqueta de clase para referencia
+        2. Procesamos cada miembro del cuerpo
+        """
+        # Emitir una etiqueta de inicio de clase
+        self.emit(f"CLASS {node.name}")
+        
+        # Procesar el cuerpo de la clase si existe
+        if node.body:
+            self.push_scope()
+            for member in node.body:
+                self.visit(member)
+            self.pop_scope()
+        
+        # Etiqueta de fin de clase
+        self.emit(f"END_CLASS {node.name}")
 
     def visit_MemberCall(self, node):
         """Visita una llamada a método/miembro."""
@@ -786,8 +804,29 @@ class IRCodeGen(Visitor):
         return self.visit(node.target)
 
     def visit_Constructor(self, node):
-        """Visita un constructor."""
-        raise NotImplementedError("TODO estudiante: implementar constructores")
+        """
+        Visita un constructor (expresión NEW).
+        
+        Sintaxis: NEW ClassName(arg1, arg2, ...)
+        
+        En el IR, emitimos:
+        1. Evaluamos cada argumento
+        2. Emitimos una instrucción NEW con el tipo de clase y argumentos
+        3. Retornamos un temporal con la referencia a la nueva instancia
+        """
+        # Evaluar todos los argumentos del constructor
+        arg_regs = []
+        for arg in node.atts:
+            arg_reg = self.visit(arg)
+            arg_regs.append(arg_reg)
+        
+        # Crear un temporal para guardar la instancia
+        out = self.new_temp()
+        
+        # Emitir instrucción NEW
+        self.emit("NEW", node.type, *arg_regs, out)
+        
+        return out
 
 
 # ===================================================
@@ -1277,3 +1316,60 @@ if __name__ == "__main__":
         ])
         ir11 = IRCodeGen.generate(ast11)
         print(ir11.format())
+
+        print("\n" + "="*50 + "\n")
+
+        # Prueba: clases, constructores y member calls
+        # Definición simple de clase Point
+        ast12 = Program([
+            ClassDecl(
+                name="Point",
+                body=[
+                    DeclTyped(name="x", typ=INT),
+                    DeclTyped(name="y", typ=INT),
+                ],
+            ),
+            DeclInit(
+                name="main",
+                typ=FuncType(ret=VOID, params=[]),
+                init=Block(stmts=[
+                    # Crear instancia de Point usando constructor
+                    DeclInit(
+                        name="p",
+                        typ=SimpleType("Point"),
+                        init=Constructor(
+                            type="Point",
+                            atts=[
+                                Literal(kind="integer", value=10),
+                                Literal(kind="integer", value=20),
+                            ],
+                        ),
+                    ),
+                    # Simular acceso a miembros usando MemberCall
+                    DeclInit(
+                        name="px",
+                        typ=INT,
+                        init=MemberCall(
+                            target=Name(id="p"),
+                            members=[
+                                Name(id="x"),
+                            ],
+                        ),
+                    ),
+                    DeclInit(
+                        name="py",
+                        typ=INT,
+                        init=MemberCall(
+                            target=Name(id="p"),
+                            members=[
+                                Name(id="y"),
+                            ],
+                        ),
+                    ),
+                    # Imprimir resultados
+                    Print(values=[Name(id="px"), Name(id="py")]),
+                ]),
+            ),
+        ])
+        ir12 = IRCodeGen.generate(ast12)
+        print(ir12.format())
