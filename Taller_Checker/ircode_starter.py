@@ -144,6 +144,9 @@ class IRCodeGen(Visitor):
         self.string_count = 0
         self.string_tabla = {}
 
+        self.array_count = 0
+        self.array_tabla = {}
+
         self.loop_actual: Optional[tuple[str, str]] = None  # (label_break, label_continue)
 
     @classmethod
@@ -230,6 +233,10 @@ class IRCodeGen(Visitor):
         return INT
 
     def type_suffix(self, ty: Type) -> str:
+        #si es arreglo pues devuelve el tipo del arreglo, porque si no devolvia ArrayType y eso no sirve
+        if isinstance(ty, (ArrayType, ArraySizedType)):
+            return self.type_suffix(ty.elem)
+        
         if isinstance(ty, (IntegerType, BooleanType)):
             return "I"
         if isinstance(ty, CharType):
@@ -332,10 +339,13 @@ class IRCodeGen(Visitor):
         return self.program
 
     def visit_DeclTyped(self, node):
-        if self.current_function is None:
+        if isinstance(node.typ, ArrayType):
+            return #eliminamos la declaracion de esa vaina porque lo imprime sin necesidad (arr)
+        elif self.current_function is None:
             self.emit(self.var_opcode(node.typ), node.name)
+            print(node.name, node.typ)
             return
-
+        
         self.bind(Storage(node.name, node.typ, is_const=False))
         self.emit(self.alloc_opcode(node.typ), node.name)
 
@@ -443,20 +453,37 @@ class IRCodeGen(Visitor):
             self.emit(self.store_opcode(storage.ty), src, storage.name)
 
         elif isinstance(node.target, Index):
-            # Obtener nombre del arreglo
+            # Obtener nombre del array
             array_name = node.target.base.id
+            
+            # Crear label global para el array si no existe
+            if array_name not in self.array_tabla:
+                array_label = f"ARR{self.array_count}"
+                self.array_tabla[array_name] = array_label
+                self.array_count += 1
+                # Guardar en globals
+                self.program.globals.append((f".{array_label}", []))
+            else:
+                array_label = self.array_tabla[array_name]
 
-            # Evaluar TODOS los índices
+            #cargamos el array en un nuevo R
+            array_addr = self.new_temp()
+            self.emit("ADDAR", f".{array_label}", array_addr)
+
+            #sacamos los indices
             index_regs = []
             for index_expr in node.target.indices:
                 index_reg = self.visit(index_expr)
                 index_regs.append(index_reg)
 
-            # Evaluar el valor a asignar
+            #sacamos el valor a asignar
             value_reg = self.visit(node.value)
 
-            # Emitir STOREARR con TODOS los índices
-            self.emit("STOREARR", array_name, *index_regs, value_reg)
+            #si hay index sacamos el valor de donde vamos a escribir, si no hay pues lo escribimos al inicio
+            offset = index_regs[0] if index_regs else 0
+            
+            #guardamos el valor en la direccion del array STOREAR array direccion y valor a asignar
+            self.emit("STOREAR", array_addr, offset, value_reg)
             
     def visit_Print(self, node):
         for expr in node.values:
@@ -550,19 +577,36 @@ class IRCodeGen(Visitor):
         return tmp
 
     def visit_Index(self, node):
-        #nombre base del arreglo
+        # Obtener nombre del array
         array_name = node.base.id
         
-        #sacar indices
+        # Crear label global para el array si no existe
+        if array_name not in self.array_tabla:
+            array_label = f"ARR{self.array_count}"
+            self.array_tabla[array_name] = array_label
+            self.array_count += 1
+
+            #guardar en global como un array
+            self.program.globals.append((f".{array_label}", []))
+        else:
+            array_label = self.array_tabla[array_name]
+        
+        #llama la direccion del array
+        array_addr = self.new_temp()
+        self.emit("ADDAR", f".{array_label}", array_addr)
+        
+        #miramos los index del array
         index_regs = []
         for index_expr in node.indices:
             index_reg = self.visit(index_expr)
             index_regs.append(index_reg)
         
+        offset = index_regs[0] if index_regs else 0
+        
         out = self.new_temp()
         
-        #sacra de los indices y poner en out
-        self.emit("LOADARR", array_name, *index_regs, out)
+        #sacamos el valor en la direccion del array LOAD array direccion y valor a asignar
+        self.emit(f"LOADAR", array_addr, offset, out)
         
         return out
 
@@ -664,20 +708,27 @@ class IRCodeGen(Visitor):
         elif node.kind == "char":
             value = ord(node.value) if isinstance(node.value, str) else int(node.value)
             self.emit("MOVB", value, tmp)
+
         elif node.kind == "string":
             if node.value not in self.string_tabla:
                 #si no existe en la tabla significa que no hay lebel entonces lo creamos
                 string_lable = f"STR{self.string_count}"
                 self.string_tabla[node.value] = string_lable
 
+                #saca los caracterres y los guarda en global
+                string_chars = []
+                for char in node.value:
+                    string_chars.append(ord(char)) #codigo ascii pa
+                string_chars.append(0) #agrega el caracter nulo al final
+
                 #crea la etiqueta para guardar el string
-                self.emit(string_lable, repr(node.value))
+                self.program.globals.append((f".{string_lable}", string_chars))
                 self.string_count += 1
 
 
-            #si ya existia o si lo acaba de crear viene aqui y lo llama al igual que su direccion
+            #si ya existia o si lo acaba de crear viene aqui y llama al label
             string_lable = self.string_tabla[node.value]
-            self.emit("MOVI", string_lable, tmp)
+            self.emit("ADDR", f".{string_lable}", tmp)
 
             
         else:
@@ -1373,3 +1424,72 @@ if __name__ == "__main__":
         ])
         ir12 = IRCodeGen.generate(ast12)
         print(ir12.format())
+
+        print("\n" + "="*50 + "\n")
+
+        # Prueba: Arrays con definición e inicialización
+        # arr: integer[] = ...
+        # arr[0] = 1; arr[1] = 2; arr[2] = 3; arr[3] = 5
+        # print(arr[0], arr[1], arr[2], arr[3])
+        ast13 = Program([
+            DeclTyped(
+                name="arr",
+                typ=ArrayType(elem=INT),
+            ),
+            DeclInit(
+                name="main",
+                typ=FuncType(ret=VOID, params=[]),
+                init=Block(stmts=[
+                    # Asignaciones a índices específicos
+                    Assign(
+                        target=Index(
+                            base=Name(id="arr"),
+                            indices=[Literal(kind="integer", value=0)],
+                        ),
+                        value=Literal(kind="integer", value=1),
+                    ),
+                    Assign(
+                        target=Index(
+                            base=Name(id="arr"),
+                            indices=[Literal(kind="integer", value=1)],
+                        ),
+                        value=Literal(kind="integer", value=2),
+                    ),
+                    Assign(
+                        target=Index(
+                            base=Name(id="arr"),
+                            indices=[Literal(kind="integer", value=2)],
+                        ),
+                        value=Literal(kind="integer", value=3),
+                    ),
+                    Assign(
+                        target=Index(
+                            base=Name(id="arr"),
+                            indices=[Literal(kind="integer", value=3)],
+                        ),
+                        value=Literal(kind="integer", value=5),
+                    ),
+                    # Lectura y impresión de índices
+                    Print(values=[
+                        Index(
+                            base=Name(id="arr"),
+                            indices=[Literal(kind="integer", value=0)],
+                        ),
+                        Index(
+                            base=Name(id="arr"),
+                            indices=[Literal(kind="integer", value=1)],
+                        ),
+                        Index(
+                            base=Name(id="arr"),
+                            indices=[Literal(kind="integer", value=2)],
+                        ),
+                        Index(
+                            base=Name(id="arr"),
+                            indices=[Literal(kind="integer", value=3)],
+                        ),
+                    ]),
+                ]),
+            ),
+        ])
+        ir13 = IRCodeGen.generate(ast13)
+        print(ir13.format())
