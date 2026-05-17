@@ -9,6 +9,8 @@ class Node:
 		method_name = 'visit_' + self.__class__.__name__
 		method = getattr(visitor, method_name, visitor.generic_visit)
 		return method(self)
+	def __str__(self):
+		return f"{self.__class__.__name__}({', '.join(f'{f.name}={getattr(self, f.name)!r}' for f in fields(self))})"
 		
 
 # ---------- Types ----------
@@ -138,7 +140,7 @@ class MemberCall(Expr):
 
 @dataclass
 class Assign(Expr):
-	target:Expr
+	target: Expr
 	value: Expr
 
 @dataclass

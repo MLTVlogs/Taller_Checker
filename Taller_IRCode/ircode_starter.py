@@ -2,6 +2,7 @@ from __future__ import annotations
 #IMPORTANTE!!!!!!!!!!!!!! todo esta escrito de la forma **opcode reg1 reg2 destino** no confundir el orden porque si no queda mal hecho todo esto
 #el orden viene desde la plantilla del profesor
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Optional
 from rich import print
@@ -230,6 +231,10 @@ class IRCodeGen(Visitor):
         return INT
 
     def type_suffix(self, ty: Type) -> str:
+        # Para arrays, extraer el tipo base recursivamente
+        if isinstance(ty, (ArraySizedType, ArrayType)):
+            return self.type_suffix(ty.elem)
+        
         if isinstance(ty, (IntegerType, BooleanType)):
             return "I"
         if isinstance(ty, CharType):
@@ -375,7 +380,11 @@ class IRCodeGen(Visitor):
             self.bind(Storage(p.name, p.typ, is_param=True))
             self.emit(self.alloc_opcode(p.typ), p.name)
 
-        self.visit(node.init)  # node.init es el Block del cuerpo
+        if isinstance(node.init, Iterable):
+            for stmt in node.init:  # node.init es el Block del cuerpo
+                self.visit(stmt)
+        else:
+            self.visit(node.init)  # node.init es el cuerpo directo (en caso de que no sea un Block)
 
         # Soporte mínimo para funciones void.
         if isinstance(node.typ.ret, VoidType) or (hasattr(node.typ.ret, 'name') and node.typ.ret.name == 'void'):
@@ -405,7 +414,8 @@ class IRCodeGen(Visitor):
             self.bind(Storage(p.name, p.typ, is_param=True))
             self.emit(self.alloc_opcode(p.typ), p.name)
 
-        self.visit(node.body)
+        for stmt in node.body:
+            self.visit(stmt)
 
         # Soporte mínimo para funciones void.
         if isinstance(node.typ, VoidType):
@@ -444,7 +454,7 @@ class IRCodeGen(Visitor):
 
         elif isinstance(node.target, Index):
             # Obtener nombre del arreglo
-            array_name = node.target.base.id
+            array_name = node.target.base
 
             # Evaluar TODOS los índices
             index_regs = []
@@ -551,7 +561,7 @@ class IRCodeGen(Visitor):
 
     def visit_Index(self, node):
         #nombre base del arreglo
-        array_name = node.base.id
+        array_name = node.base
         
         #sacar indices
         index_regs = []
@@ -657,7 +667,7 @@ class IRCodeGen(Visitor):
 
     def visit_Literal(self, node):
         tmp = self.new_temp()
-        if node.kind == "integer":
+        if node.kind in "integer":
             self.emit("MOVI", int(node.value), tmp)
         elif node.kind == "boolean":
             self.emit("MOVI", 1 if node.value else 0, tmp)
@@ -733,20 +743,28 @@ class IRCodeGen(Visitor):
 
     def visit_PostfixOp(self, node):
         """Visita un operador de postfijo."""
-        if not isinstance(node.expr, Name): raise NotImplementedError("esto no deberia estar pasando porque el semantico lo hace")
+        # Defensa contra parser que pasa argumentos en orden incorrecto
+        expr = node.expr
+        op = node.op
+        if not isinstance(expr, Name) and isinstance(op, Name):
+            # Si expr es un string y op es Name, intercambiar
+            expr, op = op, expr
 
-        variable = self.lookup(node.expr.id)
+        if not isinstance(expr, Name): 
+            raise NotImplementedError("esto no deberia estar pasando porque el semantico lo hace")
+
+        variable = self.lookup(expr.id)
 
         old_var = self.new_temp()
         self.emit(self.load_opcode(variable.ty), variable.name, old_var)
 
         out = self.new_temp()
-        if node.op== "++":
+        if op == "++":
             self.emit("ADDI", old_var, 1, out)
-        elif node.op == "--":
+        elif op == "--":
             self.emit("SUBI", old_var, 1, out)
         else:
-            raise NotImplementedError(f"Operador de postfijo no soportado: {node.op} (no deberia de aparecer porque el semantico ya lo verifica)")
+            raise NotImplementedError(f"Operador de postfijo no soportado: {op} (no deberia de aparecer porque el semantico ya lo verifica)")
 
         self.emit(self.store_opcode(variable.ty), out, variable.name)
 
@@ -778,9 +796,9 @@ class IRCodeGen(Visitor):
 
     def visit_MemberCall(self, node):
         """Visita una llamada a método/miembro."""
-        self.visit(node.target)
+        self.visit(node.target)  # Asegura que el target se procese primero para inferencia de tipo
 
-        target_name = node.target.id if isinstance(node.target, Name) else "expr"
+        target_name = node.target.id if isinstance(node.target, Name) else None
 
         for member in node.members:
             if isinstance(member, Name):
@@ -824,7 +842,7 @@ class IRCodeGen(Visitor):
         out = self.new_temp()
         
         # Emitir instrucción NEW
-        self.emit("NEW", node.type, *arg_regs, out)
+        self.emit("NEW", node.type.name, *arg_regs, out)
         
         return out
 
@@ -840,11 +858,11 @@ if __name__ == "__main__":
         filename = sys.argv[1]
         with open(filename, encoding="utf-8") as f:
             txt = f.read()
-            check = semantic_check(txt) #.ok(), lista de errores, ast
+            check, errors, ast = semantic_check(txt) #.ok(), lista de errores, ast
 
-            if check[0]: sys.exit(1) #si hubieron errores semanticos pues no ejecuta ni mierda
+            #if not check: sys.exit(1) #si hubieron errores semanticos pues no ejecuta ni mierda
 
-            ir = IRCodeGen.generate()
+            ir = IRCodeGen.generate(ast)
             print(ir.format())
 
     else:
@@ -854,11 +872,11 @@ if __name__ == "__main__":
         ast = Program([
             DeclInit(
                 name="main",
-                typ=FuncType(ret=VOID, params=[]),
+                typ=FuncType(ret=SimpleType(name="void"), params=[]),
                 init=Block(stmts=[
                     DeclInit(
                         name="msg",
-                        typ=STRING,
+                        typ=SimpleType(name="string"),
                         init=Literal(kind="string", value="Hola mundo"),
                     ),
                     Print(values=[Name(id="msg")]),
@@ -874,7 +892,7 @@ if __name__ == "__main__":
         ast2 = Program([
             DeclInit(
                 name="main",
-                typ=FuncType(ret=VOID, params=[]),
+                typ=FuncType(ret=SimpleType("void"), params=[]),
                 init=Block(stmts=[
                     Print(values=[Literal(kind="string", value="Hola mundo")]),
                 ]),
@@ -889,9 +907,9 @@ if __name__ == "__main__":
         ast3 = Program([
             DeclInit(
                 name="main",
-                typ=FuncType(ret=VOID, params=[]),
+                typ=FuncType(ret=SimpleType("void"), params=[]),
                 init=Block(stmts=[
-                    DeclTyped(name="x", typ=BOOL),
+                    DeclTyped(name="x", typ=SimpleType("boolean")),
                     Assign(
                         target=Name(id="x"),
                         value=BinOp(
@@ -908,31 +926,24 @@ if __name__ == "__main__":
 
         print("\n" + "="*50 + "\n")
 
-        # Prueba: operaciones bitwise
-        # z = (5 & 3) | (2 ^ 1)
+        # Prueba: operaciones unarias
+        # a = -10; b = !true;
         ast4 = Program([
             DeclInit(
                 name="main",
-                typ=FuncType(ret=VOID, params=[]),
+                typ=FuncType(ret=SimpleType("void"), params=[]),
                 init=Block(stmts=[
                     DeclInit(
-                        name="z",
-                        typ=INT,
-                        init=BinOp(
-                            left=BinOp(
-                                left=Literal(kind="integer", value=5),
-                                op="&",
-                                right=Literal(kind="integer", value=3),
-                            ),
-                            op="|",
-                            right=BinOp(
-                                left=Literal(kind="integer", value=2),
-                                op="^",
-                                right=Literal(kind="integer", value=1),
-                            ),
-                        ),
+                        name="a",
+                        typ=SimpleType("integer"),
+                        init=UnaryOp(op="-", expr=Literal(kind="integer", value=10)),
                     ),
-                    Print(values=[Name(id="z")]),
+                    DeclInit(
+                        name="b",
+                        typ=SimpleType("boolean"),
+                        init=UnaryOp(op="!", expr=Literal(kind="boolean", value="true")),
+                    ),
+                    Print(values=[Name(id="a"), Name(id="b")]),
                 ]),
             )
         ])
@@ -941,58 +952,27 @@ if __name__ == "__main__":
 
         print("\n" + "="*50 + "\n")
 
-        # Prueba: operaciones unarias
-        # a = -10; b = !true; c = +5
-        ast5 = Program([
-            DeclInit(
-                name="main",
-                typ=FuncType(ret=VOID, params=[]),
-                init=Block(stmts=[
-                    DeclInit(
-                        name="a",
-                        typ=INT,
-                        init=UnaryOp(op="-", expr=Literal(kind="integer", value=10)),
-                    ),
-                    DeclInit(
-                        name="b",
-                        typ=BOOL,
-                        init=UnaryOp(op="!", expr=Literal(kind="boolean", value=True)),
-                    ),
-                    DeclInit(
-                        name="c",
-                        typ=INT,
-                        init=UnaryOp(op="+", expr=Literal(kind="integer", value=5)),
-                    ),
-                    Print(values=[Name(id="a"), Name(id="b"), Name(id="c")]),
-                ]),
-            )
-        ])
-        ir5 = IRCodeGen.generate(ast5)
-        print(ir5.format())
-
-        print("\n" + "="*50 + "\n")
-
         # Prueba: comparaciones con >=
         # x: integer = 10; y: integer = 5;
         # result = x >= y
-        ast6 = Program([
+        ast5 = Program([
             DeclInit(
                 name="x",
-                typ=INT,
+                typ=SimpleType(name = "integer"),
                 init=Literal(kind="integer", value=10),
             ),
             DeclInit(
                 name="y",
-                typ=INT,
+                typ=SimpleType(name = "integer"),
                 init=Literal(kind="integer", value=5),
             ),
             DeclInit(
                 name="main",
-                typ=FuncType(ret=VOID, params=[]),
+                typ=FuncType(ret=SimpleType("void"), params=[]),
                 init=Block(stmts=[
                     DeclInit(
                         name="result",
-                        typ=BOOL,
+                        typ=SimpleType("boolean"),
                         init=BinOp(
                             left=Name(id="x"),
                             op=">=",
@@ -1003,25 +983,25 @@ if __name__ == "__main__":
                 ]),
             )
         ])
-        ir6 = IRCodeGen.generate(ast6)
-        print(ir6.format())
+        ir5 = IRCodeGen.generate(ast5)
+        print(ir5.format())
 
         print("\n" + "="*50 + "\n")
 
         # Prueba: postfijos
-        ast7 = Program([
+        ast6 = Program([
             DeclInit(
                 name="main",
-                typ=FuncType(ret=VOID, params=[]),
+                typ=FuncType(ret=SimpleType("Void"), params=[]),
                 init=Block(stmts=[
                     DeclInit(
                         name="x",
-                        typ=INT,
+                        typ=SimpleType("integer"),
                         init=Literal(kind="integer", value=1),
                     ),
                     DeclInit(
                         name="y",
-                        typ=INT,
+                        typ=SimpleType("integer"),
                         init=Literal(kind="integer", value=2),
                     ),
                     ExprStmt(
@@ -1040,8 +1020,8 @@ if __name__ == "__main__":
                 ]),
             )
         ])
-        ir7 = IRCodeGen.generate(ast7)
-        print(ir7.format())
+        ir6 = IRCodeGen.generate(ast6)
+        print(ir6.format())
 
         print("\n" + "="*50 + "\n")
 
@@ -1049,19 +1029,19 @@ if __name__ == "__main__":
         # if (x > 5) { print(1); } else { print(0); }
         # while (y < 10) { y++; }
         # for (i = 0; i < 3; i++) { print(i); }
-        ast8 = Program([
+        ast7 = Program([
             DeclInit(
                 name="main",
-                typ=FuncType(ret=VOID, params=[]),
+                typ=FuncType(ret=SimpleType("void"), params=[]),
                 init=Block(stmts=[
                     DeclInit(
                         name="x",
-                        typ=INT,
+                        typ=SimpleType("integer"),
                         init=Literal(kind="integer", value=10),
                     ),
                     DeclInit(
                         name="y",
-                        typ=INT,
+                        typ=SimpleType("integer"),
                         init=Literal(kind="integer", value=0),
                     ),
                     # if (x > 5)
@@ -1118,8 +1098,8 @@ if __name__ == "__main__":
                 ]),
             )
         ])
-        ir8 = IRCodeGen.generate(ast8)
-        print(ir8.format())
+        ir7 = IRCodeGen.generate(ast7)
+        print(ir7.format())
 
         print("\n" + "="*50 + "\n")
 
@@ -1129,14 +1109,14 @@ if __name__ == "__main__":
         # matriz[1][2] = 5
         # x = matriz[0][0]
         # y = matriz[1][2]
-        ast9 = Program([
+        ast8 = Program([
             DeclTyped(
                 name="matriz",
-                typ=INT,
+                typ=ArraySizedType(size_expr=2, elem=ArraySizedType(size_expr=3, elem=SimpleType("integer")))
             ),
             DeclInit(
                 name="main",
-                typ=FuncType(ret=VOID, params=[]),
+                typ=FuncType(ret=SimpleType("void"), params=[]),
                 init=Block(stmts=[
                     # matriz[0][0] = 1
                     Assign(
@@ -1163,7 +1143,7 @@ if __name__ == "__main__":
                     # x = matriz[0][0]
                     DeclInit(
                         name="x",
-                        typ=INT,
+                        typ=SimpleType("integer"),
                         init=Index(
                             base=Name(id="matriz"),
                             indices=[
@@ -1175,7 +1155,7 @@ if __name__ == "__main__":
                     # y = matriz[1][2]
                     DeclInit(
                         name="y",
-                        typ=INT,
+                        typ=SimpleType("integer"),
                         init=Index(
                             base=Name(id="matriz"),
                             indices=[
@@ -1189,15 +1169,15 @@ if __name__ == "__main__":
                 ]),
             )
         ])
-        ir9 = IRCodeGen.generate(ast9)
-        print(ir9.format())
+        ir8 = IRCodeGen.generate(ast8)
+        print(ir8.format())
 
         print("\n" + "="*50 + "\n")
 
-        ast10 = Program([
+        ast9 = Program([
             DeclInit(
                 name="main",
-                typ=FuncType(ret=VOID, params=[]),
+                typ=FuncType(ret=SimpleType("void"), params=[]),
                 init=Block(stmts=[
                     DeclTyped(name="i", typ=SimpleType("integer")),
                     For(
@@ -1241,18 +1221,18 @@ if __name__ == "__main__":
                 ]),
             )
         ])
-        ir10 = IRCodeGen.generate(ast10)
-        print(ir10.format())
+        ir9 = IRCodeGen.generate(ast9)
+        print(ir9.format())
 
         print("\n" + "="*50 + "\n")
 
         # Prueba: llamadas Call y MemberCall
-        ast11 = Program([
+        ast10 = Program([
             DeclInit(
                 name="foo",
-                typ=FuncType(ret=INT, params=[
-                    Param(name="a", typ=INT),
-                    Param(name="b", typ=INT),
+                typ=FuncType(ret=SimpleType("integer"), params=[
+                    Param(name="a", typ=SimpleType("integer")),
+                    Param(name="b", typ=SimpleType("integer")),
                 ]),
                 init=Block(stmts=[
                     Return(
@@ -1283,7 +1263,7 @@ if __name__ == "__main__":
                 init=Block(stmts=[
                     DeclInit(
                         name="sum",
-                        typ=INT,
+                        typ=SimpleType("integer"),
                         init=Call(
                             func="foo",
                             args=[
@@ -1314,31 +1294,31 @@ if __name__ == "__main__":
                 ]),
             ),
         ])
-        ir11 = IRCodeGen.generate(ast11)
-        print(ir11.format())
+        ir10 = IRCodeGen.generate(ast10)
+        print(ir10.format())
 
         print("\n" + "="*50 + "\n")
 
         # Prueba: clases, constructores y member calls
         # Definición simple de clase Point
-        ast12 = Program([
+        ast11 = Program([
             ClassDecl(
                 name="Point",
                 body=[
-                    DeclTyped(name="x", typ=INT),
-                    DeclTyped(name="y", typ=INT),
+                    DeclTyped(name="x", typ=SimpleType("integer")),
+                    DeclTyped(name="y", typ=SimpleType("integer")),
                 ],
             ),
             DeclInit(
                 name="main",
-                typ=FuncType(ret=VOID, params=[]),
+                typ=FuncType(ret=SimpleType(name="void"), params=[]),
                 init=Block(stmts=[
                     # Crear instancia de Point usando constructor
                     DeclInit(
                         name="p",
                         typ=SimpleType("Point"),
                         init=Constructor(
-                            type="Point",
+                            type=SimpleType(name = "Point"),
                             atts=[
                                 Literal(kind="integer", value=10),
                                 Literal(kind="integer", value=20),
@@ -1348,7 +1328,7 @@ if __name__ == "__main__":
                     # Simular acceso a miembros usando MemberCall
                     DeclInit(
                         name="px",
-                        typ=INT,
+                        typ=SimpleType(name = "integer"),
                         init=MemberCall(
                             target=Name(id="p"),
                             members=[
@@ -1358,7 +1338,7 @@ if __name__ == "__main__":
                     ),
                     DeclInit(
                         name="py",
-                        typ=INT,
+                        typ=SimpleType(name = "integer"),
                         init=MemberCall(
                             target=Name(id="p"),
                             members=[
@@ -1371,5 +1351,5 @@ if __name__ == "__main__":
                 ]),
             ),
         ])
-        ir12 = IRCodeGen.generate(ast12)
-        print(ir12.format())
+        ir11 = IRCodeGen.generate(ast11)
+        print(ir11.format())

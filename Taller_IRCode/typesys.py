@@ -1,4 +1,4 @@
-# typesys.py
+ # typesys.py
 '''
 Sistema de tipos
 ================

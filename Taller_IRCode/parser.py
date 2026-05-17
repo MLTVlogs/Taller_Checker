@@ -242,7 +242,7 @@ class Parser(sly.Parser):
 	@_("'{' stmt_list '}'")
 	def block_stmt(self, p):
 		return _L(Block(p[1]), p.lineno)
-		
+	
 	# =================================================
 	# EXPRESIONES
 	# =================================================
@@ -423,7 +423,7 @@ class Parser(sly.Parser):
 	def group(self, p):
 		return _L(Index(p[0],p[1]),p.lineno)
 	
-	@_("ID member_acc_list")
+	@_("expr member_acc_list")
 	def group(self, p):
 		return _L(MemberCall(p[0],p[1]), p.lineno)
 
@@ -473,7 +473,7 @@ class Parser(sly.Parser):
 		
 	@_("INTEGER_LITERAL")
 	def factor(self, p):
-		return _L(Literal("int", p[0]), p.lineno)
+		return _L(Literal("integer", p[0]), p.lineno)
 		
 	@_("FLOAT_LITERAL")
 	def factor(self, p):
@@ -489,7 +489,7 @@ class Parser(sly.Parser):
 		
 	@_("TRUE", "FALSE")
 	def factor(self, p):
-		return _L(Literal("bool", p[0]), p.lineno)
+		return _L(Literal("boolean", p[0]), p.lineno)
 		
 	# =================================================
 	# TIPOS
