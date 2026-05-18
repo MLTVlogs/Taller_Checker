@@ -820,10 +820,10 @@ if __name__ == "__main__":
             If(
                 cond = Literal("boolean", "false"),
                 then = Block([
-                    Print(Literal("integer", 111))
+                    Print([Literal("integer", 111)])
                 ]),
                 otherwise = Block([
-                    Print(Literal("integer", 222))
+                    Print([Literal("integer", 222)])
                 ])
             ),
             While(

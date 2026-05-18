@@ -1172,7 +1172,7 @@ if __name__ == "__main__":
                     # matriz[0][0] = 1
                     Assign(
                         target=Index(
-                            base=Name(id="matriz"),
+                            base="matriz",
                             indices=[
                                 Literal(kind="integer", value=0),
                                 Literal(kind="integer", value=0),
@@ -1183,7 +1183,7 @@ if __name__ == "__main__":
                     # matriz[1][2] = 5
                     Assign(
                         target=Index(
-                            base=Name(id="matriz"),
+                            base="matriz",
                             indices=[
                                 Literal(kind="integer", value=1),
                                 Literal(kind="integer", value=2),
@@ -1196,7 +1196,7 @@ if __name__ == "__main__":
                         name="x",
                         typ=SimpleType("integer"),
                         init=Index(
-                            base=Name(id="matriz"),
+                            base="matriz",
                             indices=[
                                 Literal(kind="integer", value=0),
                                 Literal(kind="integer", value=0),
@@ -1208,7 +1208,7 @@ if __name__ == "__main__":
                         name="y",
                         typ=SimpleType("integer"),
                         init=Index(
-                            base=Name(id="matriz"),
+                            base="matriz",
                             indices=[
                                 Literal(kind="integer", value=1),
                                 Literal(kind="integer", value=2),
@@ -1424,28 +1424,28 @@ if __name__ == "__main__":
                     # Asignaciones a índices específicos
                     Assign(
                         target=Index(
-                            base=Name(id="arr"),
+                            base="arr",
                             indices=[Literal(kind="integer", value=0)],
                         ),
                         value=Literal(kind="integer", value=1),
                     ),
                     Assign(
                         target=Index(
-                            base=Name(id="arr"),
+                            base="arr",
                             indices=[Literal(kind="integer", value=1)],
                         ),
                         value=Literal(kind="integer", value=2),
                     ),
                     Assign(
                         target=Index(
-                            base=Name(id="arr"),
+                            base="arr",
                             indices=[Literal(kind="integer", value=2)],
                         ),
                         value=Literal(kind="integer", value=3),
                     ),
                     Assign(
                         target=Index(
-                            base=Name(id="arr"),
+                            base="arr",
                             indices=[Literal(kind="integer", value=3)],
                         ),
                         value=Literal(kind="integer", value=5),
@@ -1453,19 +1453,19 @@ if __name__ == "__main__":
                     # Lectura y impresión de índices
                     Print(values=[
                         Index(
-                            base=Name(id="arr"),
+                            base="arr",
                             indices=[Literal(kind="integer", value=0)],
                         ),
                         Index(
-                            base=Name(id="arr"),
+                            base="arr",
                             indices=[Literal(kind="integer", value=1)],
                         ),
                         Index(
-                            base=Name(id="arr"),
+                            base="arr",
                             indices=[Literal(kind="integer", value=2)],
                         ),
                         Index(
-                            base=Name(id="arr"),
+                            base="arr",
                             indices=[Literal(kind="integer", value=3)],
                         ),
                     ]),

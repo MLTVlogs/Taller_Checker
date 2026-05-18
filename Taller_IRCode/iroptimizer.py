@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Optional
-
+from rich import print
 from ircode import IRProgram, IRFunction, Instruction, IRCodeGen
 
 
@@ -66,14 +66,75 @@ class IROptimizer:
             if op in {"ADDI", "SUBI", "MULI", "DIVI", "ADDF", "SUBF", "MULF", "DIVF"} and len(inst) == 4:
                 a, b, dst = inst[1], inst[2], inst[3]
 
-                # TODO 1:
-                # Si a y b son constantes, evaluar la operación.
-                # Reemplazar por MOVI o MOVF.
-                # No optimizar división por cero.
+                if a in const and b in const:
+                    a_val, b_val = const[a], const[b]
+                    if op == "ADDI":
+                        result = a_val + b_val
+                    elif op == "SUBI":
+                        result = a_val - b_val
+                    elif op == "MULI":
+                        result = a_val * b_val
+                    elif op == "DIVI":
+                        if b_val != 0:
+                            result = a_val // b_val
+                        else:
+                            result = None
+                    elif op == "ADDF":
+                        result = a_val + b_val
+                    elif op == "SUBF":
+                        result = a_val - b_val
+                    elif op == "MULF":
+                        result = a_val * b_val
+                    elif op == "DIVF":
+                        if b_val != 0.0:
+                            result = a_val / b_val
+                        else:
+                            result = None
+                    else:
+                        result = None
+                    
+                    if result is not None:
+                        if op.endswith("I"):
+                            out.append(("MOVI", result, dst))
+                            const[dst] = result
+                        elif op.endswith("F"):
+                            out.append(("MOVF", result, dst))
+                            const[dst] = result
+                        continue
 
-                # TODO 2:
-                # Aplicar reglas algebraicas simples.
-
+                if op in {"ADDI", "ADDF"}:
+                    if a in const and const[a] == 0:
+                        out.append(("MOVI" if op.endswith("I") else "MOVF", b, dst))
+                        const[dst] = const[b]
+                    elif b in const and const[b] == 0:
+                        out.append(("MOVI" if op.endswith("I") else "MOVF", a, dst))
+                        const[dst] = const[a]
+                    continue
+                elif op in {"SUBI", "SUBF"}:
+                    if b in const and const[b] == 0:
+                        out.append(("MOVI" if op.endswith("I") else "MOVF", a, dst))
+                        const[dst] = const[a]
+                    continue
+                elif op in {"MULI", "MULF"}:
+                    if a in const and const[a] == 1:
+                        out.append(("MOVI" if op.endswith("I") else "MOVF", b, dst))
+                        const[dst] = const[b]
+                    elif a in const and const[a] == 0:
+                        out.append(("MOVI" if op.endswith("I") else "MOVF", 0, dst))
+                        const[dst] = 0
+                    elif b in const and const[b] == 1:
+                        out.append(("MOVI" if op.endswith("I") else "MOVF", a, dst))
+                        const[dst] = const[a]
+                    elif b in const and const[b] == 0:
+                        out.append(("MOVI" if op.endswith("I") else "MOVF", 0, dst))
+                        const[dst] = 0
+                    continue
+                elif op in {"DIVI", "DIVF"}:
+                    if b in const and const[b] == 1:
+                        out.append(("MOVI" if op.endswith("I") else "MOVF", a, dst))
+                        const[dst] = const[a]
+                    continue
+                    
                 const.pop(dst, None)
                 out.append(inst)
                 continue
@@ -81,8 +142,13 @@ class IROptimizer:
             if op in {"CMPI", "CMPF", "CMPB"} and len(inst) == 5:
                 cmp_oper, a, b, dst = inst[1], inst[2], inst[3], inst[4]
 
-                # TODO 3:
-                # Si a y b son constantes, reemplazar por MOVI 1 o MOVI 0.
+                if a in const and b in const:
+                    a_val, b_val = const[a], const[b]
+                    if cmp_oper in {"==", "!=", "<", "<=", ">", ">="}:
+                        result = 1 if self.eval_cmp(cmp_oper, a_val, b_val) else 0
+                        out.append(("MOVI", result, dst))
+                        const[dst] = result
+                    continue
 
                 const.pop(dst, None)
                 out.append(inst)
@@ -91,8 +157,12 @@ class IROptimizer:
             if op == "CBRANCH" and len(inst) == 4:
                 test, true_label, false_label = inst[1], inst[2], inst[3]
 
-                # TODO 4:
-                # Si test es constante, reemplazar por BRANCH true_label o false_label.
+                if test in const:
+                    if const[test]:
+                        out.append(("BRANCH", true_label))
+                    else:
+                        out.append(("BRANCH", false_label))
+                    continue
 
                 out.append(inst)
                 continue
@@ -112,10 +182,12 @@ class IROptimizer:
         for inst in instructions:
             op = inst[0]
 
-            # TODO 5:
-            # Si llega un LABEL, termina la zona inalcanzable.
-            # Si estamos en zona inalcanzable, descartar la instrucción.
-            # Si se ve BRANCH o RET, marcar unreachable = True.
+            if op == "LABEL":
+                unreachable = False
+            if unreachable:
+                continue
+            if op in {"BRANCH", "RET"}:
+                unreachable = True
 
             out.append(inst)
 
@@ -128,9 +200,12 @@ class IROptimizer:
         while i < len(instructions):
             inst = instructions[i]
 
-            # TODO 6:
-            # Si inst es BRANCH Lx y la siguiente instrucción es LABEL Lx,
-            # eliminar el BRANCH.
+            if inst[0] == "BRANCH" and i + 1 < len(instructions):
+                target_label = inst[1]
+                next_inst = instructions[i + 1]
+                if next_inst[0] == "LABEL" and next_inst[1] == target_label:
+                    i += 1  # Saltar el BRANCH
+                    continue
 
             out.append(inst)
             i += 1
@@ -149,12 +224,12 @@ class IROptimizer:
             dst = self.defined_temp(inst)
             args = self.used_temps(inst)
 
-            # TODO 7:
-            # Si dst no es None, dst no está en used y la instrucción es pura,
-            # eliminarla.
+            if dst is not None:
+                if dst not in used and self.is_pure_definition(inst):
+                    continue
 
-            # TODO 8:
-            # Actualizar used correctamente.
+            used.difference_update({dst} if dst is not None else set())
+            used.update(args)
 
             result_reversed.append(inst)
 
@@ -237,3 +312,198 @@ class IROptimizer:
         if oper == ">=":
             return a >= b
         raise NotImplementedError(f"Comparador no soportado: {oper}")
+    
+def optimize_insts(insts, level):
+    fn = IRFunction("main", [], None, insts)
+    program = IRProgram([], [fn])
+    opt = IROptimizer.optimize(program, level=level)
+    return opt.functions[0].instructions
+    
+if __name__ == "__main__":
+    import sys
+    from checker import semantic_check
+    from astopt import optimize_ast_o1
+
+    if "-O0" in sys.argv:
+        filename = sys.argv[1]
+        with open(filename, encoding="utf-8") as f:
+            txt = f.read()
+            check, errors, ast = semantic_check(txt)
+            if not check:
+                print("Errores semánticos:")
+                for err in errors:
+                    print(err)
+                    sys.exit(1)
+            else:
+                ir = IRCodeGen.generate(ast)
+                irO0 = IROptimizer.optimize(ir, level=0)
+                print(irO0.format())
+    elif "-O1" in sys.argv:
+        filename = sys.argv[1]
+        with open(filename, encoding="utf-8") as f:
+            txt = f.read()
+            check, errors, ast = semantic_check(txt)
+            if not check:
+                print("Errores semánticos:")
+                for err in errors:
+                    print(err)
+                    sys.exit(1)
+            else:
+                ir = IRCodeGen.generate(ast)
+                irO1 = IROptimizer.optimize(ir, level=1)
+                print(irO1.format())
+    elif "-O2" in sys.argv:
+        filename = sys.argv[1]
+        with open(filename, encoding="utf-8") as f:
+            txt = f.read()
+            check, errors, ast = semantic_check(txt)
+            if not check:
+                print("Errores semánticos:")
+                for err in errors:
+                    print(err)
+                    sys.exit(1)
+            else:
+                ir = IRCodeGen.generate(ast)
+                irO2 = IROptimizer.optimize(ir, level=2)
+                print(irO2.format())
+    else:
+        print("Si desea ejecutar codigo txt personalizado usar:")
+        print("python iroptimizer.py archivo.bminor -O0")
+        print("python iroptimizer.py archivo.bminor -O1")
+        print("python iroptimizer.py archivo.bminor -O2")
+
+        #-------------------------------------------------------
+        # PRUEBAS INSTRUCCIONES O1
+        #-------------------------------------------------------
+        print("="*50)
+        print("|PRUEBAS INSTRUCCIONES O1|".center(50, " "))
+        print("="*50,"\n")
+
+        # Prueba constraint folding ADDI O1
+        print(">>> CONSTRAINT FOLDING\n")
+
+        insts1 = [
+            ("MOVI", 2, "R1"),
+            ("MOVI", 3, "R2"),
+            ("ADDI", "R1", "R2", "R3"),
+            ("PRINTI", "R3"),
+        ]
+        print("O0 - Sin optimizar:")
+        print(insts1,"")
+
+        out1 = optimize_insts(insts1, level=1)
+        print("O1 - Optimizado:")
+        print(out1,"")
+        print("-"*50,"\n")
+
+        # Prueba Simplificación Algebráica O1
+        print(">>> SIMPLIFICACIÓN ALGEBRÁICA\n")
+
+        insts2 = [
+            ("MOVI", 5, "R1"),
+            ("MOVI", 0, "R2"),
+            ("ADDI", "R1", "R2", "R3"),
+            ("PRINTI", "R3")
+        ]
+
+        print("O0 - Sin optimizar:")
+        print(insts2,"")
+
+        out2 = optimize_insts(insts2, level=1)
+        print("O1 - Optimizado:")
+        print(out2,"")
+        print("-"*50,"\n")        
+
+        # Prueba comparaciones constantes O1
+        print(">>> COMPARACIONES CONSTANTES\n")
+        
+        insts3 = [
+            ("MOVI", 2, "R1"),
+            ("MOVI", 5, "R2"),
+            ("CMPI", ">", "R1", "R2", "R3")
+        ]
+        
+        print("O0 - Sin optimizar:")
+        print(insts3,"")
+
+        out3 = optimize_insts(insts3, level=1)
+        print("O1 - Optimizado:")
+        print(out3,"")
+        print("-"*50,"\n")
+
+        # Prueba simplificación de ramas condicionales O1
+        print(">>> SIMPLIFICACIÓN DE RAMAS CONDICIONALES\n")
+
+        insts4 = [
+            ("MOVI", 1, "R1"),
+            ("CBRANCH", "R1", "Ltrue", "Lfalse")
+        ]
+
+        print("O0 - Sin optimizar:")
+        print(insts4,"")
+
+        out4 = optimize_insts(insts4, level=1)
+        print("O1 - Optimizado:")
+        print(out4,"")
+        print("-"*50,"\n")  
+
+        # Prueba Código Inalcanzable O1
+        print(">>> CÓDIGO INALCANZABLE\n")
+
+        insts5 = [
+            ("BRANCH", "L1"),
+            ("MOVI", 99, "R9"),
+            ("PRINTI", "R9"),
+            ("LABEL", "L1"),
+            ("MOVI", 1, "R1")
+        ]
+
+        print("O0 - Sin optimizar:")
+        print(insts5,"")
+
+        out5 = optimize_insts(insts5, level=1)
+        print("O1 - Optimizado:")
+        print(out5,"")
+        print("-"*50,"\n")  
+
+        # Prueba Salto al siguiente label O1
+        print(">>> SALTO AL SIGUIENTE LABEL\n")
+        insts6 = [
+            ("BRANCH", "L1"),
+            ("LABEL", "L1")
+        ]
+
+        print("O0 - Sin optimizar:")
+        print(insts6,"")
+
+        out6 = optimize_insts(insts6, level=1)
+        print("O1 - Optimizado:")
+        print(out6,"")
+
+
+        #-------------------------------------------------------
+        # PRUEBAS O2
+        #-------------------------------------------------------
+        print("="*50)
+        print("|PRUEBAS INSTRUCCIONES O2|".center(50, " "))
+        print("="*50,"\n")
+
+        # Prueba Eliminación de temportales muertos O2
+        print(">>> ELIMINACIÓN DE TEMPORALES MUERTOS\n")
+        
+        insts7 = [
+            ("MOVI", 2, "R1"),
+            ("MOVI", 3, "R2"),
+            ("ADDI", "R1", "R2", "R3"),
+            ("MOVI", 99, "R4"),
+            ("PRINTI", "R3"),
+        ]
+        print("O0 - Sin optimizar:")
+        print(insts7,"")
+
+        out7 = optimize_insts(insts7, level=2)
+        print("O2 - Optimizado:")
+        print(out7,"")
+        print("-"*50,"\n")  
+
+
