@@ -1,0 +1,7 @@
+matriz: array[2] array[3] integer;
+
+main: function void() = {
+    matriz[0] = 1;
+    matriz[1] = 2;
+    
+}

@@ -1,0 +1,18 @@
+main: function void() = {
+    x: integer = 10;
+    y: integer = 0;
+
+    if (x > 5){
+        print 1;
+    } else {
+        print 0;
+    }
+
+    while (y > 10){
+        y++;
+    }
+
+    for (x = 0; x < 3; x++){
+        print x;
+    }
+}

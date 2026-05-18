@@ -253,10 +253,11 @@ class ASTOptimizer(Visitor):
     def visit_DeclInit(self, node):
         # Si es una función, optimizarla como tal
         if isinstance(node.typ, FuncType):
-            body = node.init.accept(self)
-            if body is not node.init:
-                self.mark_changed()
-                return replace(node, init=body)
+            for stmt in node.init:
+                if isinstance(stmt, Node):
+                    new_stmt = stmt.accept(self)
+                    if new_stmt is not stmt:
+                        self.mark_changed()
             return node
         elif isinstance(node.typ, ArraySizedType):
             # Si es un arreglo, optimizar la expresión de tamaño o inicialización
@@ -368,10 +369,12 @@ class ASTOptimizer(Visitor):
         return node
         
     def visit_Print(self, node):
-        values = node.values.accept(self)
-        if values is not node.values:
-            self.mark_changed()
-            return replace(node, values=values)
+        for value in node.values:
+            if isinstance(value, Node):
+                new_value = value.accept(self)
+                if new_value is not value:
+                    self.mark_changed()
+                    return replace(node, values=[new_value if v is value else v for v in node.values])
         return node
         
     def visit_Return(self, node):
@@ -451,10 +454,12 @@ class ASTOptimizer(Visitor):
         return node
         
     def visit_Index(self, node):
-        index = node.index.accept(self)
-        if index is not node.index:
-            self.mark_changed()
-            return replace(node, index=index)
+        for index in node.indices:
+            if isinstance(index, Node):
+                new_index = index.accept(self)
+                if new_index is not index:
+                    self.mark_changed()
+                    return replace(node, indices=[new_index if i is index else i for i in node.indices])
         return node
         
     def visit_Call(self, node):
@@ -484,7 +489,7 @@ class ASTOptimizer(Visitor):
     # Literales
     # -------------------------------------------------
     
-    def visit(self, node: Literal):
+    def visit_Literal(self, node):
         return node
     
     # -------------------------------------------------
@@ -630,7 +635,7 @@ class ASTOptimizer(Visitor):
         
     def visit_UnaryOp(self, node):
         expr = node.expr.accept(self)
-        op = node.oper
+        op = node.op
         
         if is_int(expr):
             if op == "-":
@@ -657,6 +662,49 @@ class ASTOptimizer(Visitor):
             return replace(node, expr=expr)
             
         return node
+    
+    def visit_PostfixOp(self, node):
+        expr = node.expr.accept(self)
+        op = node.op
+        
+        # x++ -> x = x + 1, pero solo si no hay efectos laterales.
+        if is_int(expr):
+            if op == "++" and not has_side_effect(expr):
+                self.mark_changed()
+                return Assign(
+                    target=expr,
+                    value=BinOp(op="+", left=expr, right=Literal("integer", 1, lineno=node.lineno)),
+                    lineno=node.lineno
+                )
+            if op == "--" and not has_side_effect(expr):
+                self.mark_changed()
+                return Assign(
+                    target=expr,
+                    value=BinOp(op="-", left=expr, right=Literal("integer", 1, lineno=node.lineno)),
+                    lineno=node.lineno
+                )
+        
+        if is_float(expr):
+            if op == "++" and not has_side_effect(expr):
+                self.mark_changed()
+                return Assign(
+                    target=expr,
+                    value=BinOp(op="+", left=expr, right=Literal("float", 1, lineno=node.lineno)),
+                    lineno=node.lineno
+                )
+            if op == "--" and not has_side_effect(expr):
+                self.mark_changed()
+                return Assign(
+                    target=expr,
+                    value=BinOp(op="-", left=expr, right=Literal("float", 1, lineno=node.lineno)),
+                    lineno=node.lineno
+                )
+        
+        if expr is not node.expr:
+            self.mark_changed()
+            return replace(node, expr=expr)
+        
+        return node
         
     def visit_TernaryOp(self, node):
         cond = node.cond.accept(self)
@@ -679,7 +727,6 @@ class ASTOptimizer(Visitor):
             )
             
         return node
-        
         
 # ---------------------------------------------------
 # API pública
@@ -711,171 +758,100 @@ def optimize_ast_o1(ast: Node, max_passes: int = 10, verbose: bool = False) -> N
             
     return current
 
-ast = Program([
-    DeclInit(
-        name = "x",
-        typ = SimpleType(name="int"),
-        init = BinOp(
-            op = "+",
-            left = Literal("integer", 3),
-            right = BinOp(
-                op = "*",
-                left = Literal("integer", 4),
-                right = Literal("integer", 2)
-            )
-        )
-    ),
-    DeclInit(
-        name = "y",
-        typ = SimpleType(name="int"),
-        init = BinOp(
-            op = "+",
-            left = Name("x"),
-            right = Literal("integer", 0)
-        )
-    ),
-    DeclInit(
-        name = "z",
-        typ = SimpleType(name="int"),
-        init = BinOp(
-            op = "*",
-            left = Name("y"),
-            right = Literal("integer", 1)
-        )
-    ),
-    DeclInit(
-        name = "w",
-        typ = SimpleType(name="int"),
-        init = BinOp(
-            op = "*",
-            left = Name("z"),
-            right = Literal("integer", 0)
-        )
-    ),
-    If(
-        cond = Literal("boolean", False),
-        then = Block([
-            Print(Literal("integer", 111))
-        ]),
-        otherwise = Block([
-            Print(Literal("integer", 222))
-        ])
-    ),
-    While(
-        cond = Literal("boolean", False),
-        body = Block([
-            Print(Literal("integer", 999))
-        ])
-    ),
-    DeclInit(
-        name = "t",
-        typ = SimpleType(name="int"),
-        init = TernOp(
-            cond = Literal("boolean", True),
-            then = Literal("integer", 10),
-            otherwise = Literal("integer", 20)
-        )
-    )
-])
+if __name__ == "__main__":
+    import sys
 
-'''ast = Program([
-    VarDecl(
-        "x",
-        IntegerType(),
+    print(sys.argv)
 
-        BinOp(
-            "+",
-            IntegerLiteral(value=3),
+    if "-astopt" in sys.argv:
+        filename = sys.argv[-1]
+        with open(filename, encoding="utf-8") as f:
+            txt = f.read()
+            check, errors, ast = semantic_check(txt)
 
-            BinOp(
-                "*",
-                IntegerLiteral(value=4),
-                IntegerLiteral(value=2)
-            )
-        )
-    ),
+            if not check: 
+                for err in errors():
+                    print(err)
+                sys.exit(1) #si hubieron errores semanticos pues no ejecuta ni mierda
 
-    VarDecl(
-        "y",
-        IntegerType(),
-
-        BinOp(
-            "+",
-            VarLoc("x"),
-            IntegerLiteral(value=0)
-        )
-    ),
-
-    VarDecl(
-        "z",
-        IntegerType(),
-
-        BinOp(
-            "*",
-            VarLoc("y"),
-            IntegerLiteral(value=1)
-        )
-    ),
-
-    VarDecl(
-        "w",
-        IntegerType(),
-
-        BinOp(
-            "*",
-            VarLoc("z"),
-            IntegerLiteral(value=0)
-        )
-    ),
-
-    IfStmt(
-        BooleanLiteral(value=True),
-
-        Block([
-            PrintStmt(
-                IntegerLiteral(value=111)
-            )
-        ]),
-
-        Block([
-            PrintStmt(
-                IntegerLiteral(value=222)
+    else:
+        print("Demo de ASTOptimizer, si desea ejecutar codigo txt usar python astopt.py -ir <filename>:\n")
+        ast = Program([
+            DeclInit(
+                name = "x",
+                typ = SimpleType(name="int"),
+                init = BinOp(
+                    op = "+",
+                    left = Literal("integer", 3),
+                    right = BinOp(
+                        op = "*",
+                        left = Literal("integer", 4),
+                        right = Literal("integer", 2)
+                    )
+                )
+            ),
+            DeclInit(
+                name = "y",
+                typ = SimpleType(name="int"),
+                init = BinOp(
+                    op = "+",
+                    left = Name("x"),
+                    right = Literal("integer", 0)
+                )
+            ),
+            DeclInit(
+                name = "z",
+                typ = SimpleType(name="int"),
+                init = BinOp(
+                    op = "*",
+                    left = Name("y"),
+                    right = Literal("integer", 1)
+                )
+            ),
+            DeclInit(
+                name = "w",
+                typ = SimpleType(name="int"),
+                init = BinOp(
+                    op = "*",
+                    left = Name("z"),
+                    right = Literal("integer", 0)
+                )
+            ),
+            If(
+                cond = Literal("boolean", "false"),
+                then = Block([
+                    Print(Literal("integer", 111))
+                ]),
+                otherwise = Block([
+                    Print(Literal("integer", 222))
+                ])
+            ),
+            While(
+                cond = Literal("boolean", "false"),
+                body = Block([
+                    Print(Literal("integer", 999))
+                ])
+            ),
+            DeclInit(
+                name = "t",
+                typ = SimpleType(name="int"),
+                init = TernOp(
+                    cond = Literal("boolean", "true"),
+                    then = Literal("integer", 10),
+                    otherwise = Literal("integer", 20)
+                )
             )
         ])
-    ),
 
-    WhileStmt(
-        BooleanLiteral(value=False),
+    print("="*50)
+    print("AST ORIGINAL")
+    print("="*50)
+    print(ast)
 
-        Block([
-            PrintStmt(
-                IntegerLiteral(value=999)
-            )
-        ])
-    ),
+    optimized = optimize_ast_o1(ast, verbose=True)
 
-    VarDecl(
-        "t",
-        IntegerType(),
-
-        ConditionalExpr(
-            BooleanLiteral(value=True),
-            IntegerLiteral(value=10),
-            IntegerLiteral(value=20)
-        )
-    )
-
-])'''
-
-print("===================================")
-print("AST ORIGINAL")
-print("===================================")
-print(ast)
-
-optimized = optimize_ast_o1(ast, verbose=True)
-
-print()
-print("===================================")
-print("AST OPTIMIZADO")
-print("===================================")
-print(optimized)
+    print()
+    print("="*50)
+    print("AST OPTIMIZADO")
+    print("="*50)
+    print(optimized)

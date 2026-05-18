@@ -1,0 +1,5 @@
+main: function void() = {
+    a: integer = -10;
+    b: boolean = !true;
+    print a, b;
+}

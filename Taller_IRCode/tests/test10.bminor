@@ -1,0 +1,14 @@
+foo: function integer(a: integer, b: integer) = {
+    return a + b;
+}
+
+bar: function integer(x: integer) = {
+    x * 2;
+}
+
+main: function void() = {
+    sum: integer = foo(3,4);
+    obj: integer = 0;
+    result: integer = obj.bar(5);
+    print sum;
+}

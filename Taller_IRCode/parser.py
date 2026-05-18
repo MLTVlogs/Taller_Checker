@@ -389,11 +389,11 @@ class Parser(sly.Parser):
 
 	@_("postfix INC")
 	def postfix(self, p):
-		return _L(PostfixOp(p[0],p[1]),p.lineno)
+		return _L(PostfixOp(p[1],p[0]),p.lineno)
 
 	@_("postfix DEC")
 	def postfix(self, p):
-		return _L(PostfixOp(p[0],p[1]),p.lineno)
+		return _L(PostfixOp(p[1],p[0]),p.lineno)
 
 	@_("prefix")
 	def primary(self, p):

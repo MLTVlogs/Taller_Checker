@@ -10,7 +10,7 @@ class Node:
 		method = getattr(visitor, method_name, visitor.generic_visit)
 		return method(self)
 	def __str__(self):
-		return f"{self.__class__.__name__}({', '.join(f'{f.name}={getattr(self, f.name)!r}' for f in fields(self))})"
+		return f"{self.__class__.__name__}({', '.join(f'{k}={v}' for k, v in self.__dict__.items())})"
 		
 
 # ---------- Types ----------

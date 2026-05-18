@@ -1,0 +1,7 @@
+x: integer = 10;
+y: integer = 5;
+
+main: function void() = {
+    result: boolean = x >= y;
+    print result;
+}

@@ -1,0 +1,4 @@
+main: function void() = {
+    x: boolean;
+    x = 12 == 34;
+}

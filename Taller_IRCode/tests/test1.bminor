@@ -1,0 +1,4 @@
+main: function void() = {
+    msg: string = "Hola mundo";
+    print msg;
+}
