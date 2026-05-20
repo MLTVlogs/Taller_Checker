@@ -63,6 +63,7 @@ class IROptimizer:
                 out.append(inst)
                 continue
 
+            # CONSTANT FOLDING
             if op in {"ADDI", "SUBI", "MULI", "DIVI", "ADDF", "SUBF", "MULF", "DIVF"} and len(inst) == 4:
                 a, b, dst = inst[1], inst[2], inst[3]
 
@@ -92,7 +93,7 @@ class IROptimizer:
                             result = None
                     else:
                         result = None
-                    
+
                     if result is not None:
                         if op.endswith("I"):
                             out.append(("MOVI", result, dst))
@@ -102,43 +103,58 @@ class IROptimizer:
                             const[dst] = result
                         continue
 
-                if op in {"ADDI", "ADDF"}:
-                    if a in const and const[a] == 0:
-                        out.append(("MOVI" if op.endswith("I") else "MOVF", b, dst))
-                        const[dst] = const[b]
-                    elif b in const and const[b] == 0:
-                        out.append(("MOVI" if op.endswith("I") else "MOVF", a, dst))
-                        const[dst] = const[a]
+                    const.pop(dst, None)
+                    out.append(inst)
                     continue
-                elif op in {"SUBI", "SUBF"}:
-                    if b in const and const[b] == 0:
-                        out.append(("MOVI" if op.endswith("I") else "MOVF", a, dst))
-                        const[dst] = const[a]
-                    continue
-                elif op in {"MULI", "MULF"}:
-                    if a in const and const[a] == 1:
-                        out.append(("MOVI" if op.endswith("I") else "MOVF", b, dst))
-                        const[dst] = const[b]
-                    elif a in const and const[a] == 0:
-                        out.append(("MOVI" if op.endswith("I") else "MOVF", 0, dst))
-                        const[dst] = 0
-                    elif b in const and const[b] == 1:
-                        out.append(("MOVI" if op.endswith("I") else "MOVF", a, dst))
-                        const[dst] = const[a]
-                    elif b in const and const[b] == 0:
-                        out.append(("MOVI" if op.endswith("I") else "MOVF", 0, dst))
-                        const[dst] = 0
-                    continue
-                elif op in {"DIVI", "DIVF"}:
-                    if b in const and const[b] == 1:
-                        out.append(("MOVI" if op.endswith("I") else "MOVF", a, dst))
-                        const[dst] = const[a]
-                    continue
-                    
-                const.pop(dst, None)
-                out.append(inst)
+
+                # SIMPLIFICACIÓN ALGEBRÁICA
+                simplified = False
+                if a in const or b in const:
+                    a_val = const[a] if a in const else None
+                    b_val = const[b] if b in const else None
+                    if op in {"ADDI", "ADDF"}:
+                        if a_val == 0:
+                            out.append(("MOVI" if op.endswith("I") else "MOVF", b, dst))
+                            const[dst] = b_val
+                            simplified = True
+                        elif b_val == 0:
+                            out.append(("MOVI" if op.endswith("I") else "MOVF", a, dst))
+                            const[dst] = a_val
+                            simplified = True
+                    elif op in {"SUBI", "SUBF"}:
+                        if b_val == 0:
+                            out.append(("MOVI" if op.endswith("I") else "MOVF", a, dst))
+                            const[dst] = a_val
+                            simplified = True
+                    elif op in {"MULI", "MULF"}:
+                        if a_val == 1:
+                            out.append(("MOVI" if op.endswith("I") else "MOVF", b, dst))
+                            const[dst] = b_val
+                            simplified = True
+                        elif a_val == 0:
+                            out.append(("MOVI" if op.endswith("I") else "MOVF", 0, dst))
+                            const[dst] = 0
+                            simplified = True
+                        elif b_val == 1:
+                            out.append(("MOVI" if op.endswith("I") else "MOVF", a, dst))
+                            const[dst] = a_val
+                            simplified = True
+                        elif b_val == 0:
+                            out.append(("MOVI" if op.endswith("I") else "MOVF", 0, dst))
+                            const[dst] = 0
+                            simplified = True
+                    elif op in {"DIVI", "DIVF"}:
+                        if b_val == 1:
+                            out.append(("MOVI" if op.endswith("I") else "MOVF", a, dst))
+                            const[dst] = a_val
+                            simplified = True
+
+                if not simplified:
+                    const.pop(dst, None)
+                    out.append(inst)
                 continue
 
+            # COMPARACIONES CONSTANTES
             if op in {"CMPI", "CMPF", "CMPB"} and len(inst) == 5:
                 cmp_oper, a, b, dst = inst[1], inst[2], inst[3], inst[4]
 
@@ -148,12 +164,13 @@ class IROptimizer:
                         result = 1 if self.eval_cmp(cmp_oper, a_val, b_val) else 0
                         out.append(("MOVI", result, dst))
                         const[dst] = result
-                    continue
+                        continue
 
                 const.pop(dst, None)
                 out.append(inst)
                 continue
 
+            # SIMPLIFICACIÓN DE RAMAS CONDICIONALES
             if op == "CBRANCH" and len(inst) == 4:
                 test, true_label, false_label = inst[1], inst[2], inst[3]
 
@@ -163,7 +180,7 @@ class IROptimizer:
                     else:
                         out.append(("BRANCH", false_label))
                     continue
-
+                
                 out.append(inst)
                 continue
 
@@ -174,11 +191,13 @@ class IROptimizer:
             out.append(inst)
 
         return out
-
+    
+    # CÓDIGO INALCANZABLE
     def remove_unreachable(self, instructions: list[Instruction]) -> list[Instruction]:
         out: list[Instruction] = []
         unreachable = False
-
+        
+        
         for inst in instructions:
             op = inst[0]
 
@@ -192,7 +211,8 @@ class IROptimizer:
             out.append(inst)
 
         return out
-
+    
+    # SALTO AL SIGUIENTE LABEL
     def remove_branch_to_next_label(self, instructions: list[Instruction]) -> list[Instruction]:
         out: list[Instruction] = []
         i = 0
@@ -216,6 +236,7 @@ class IROptimizer:
     # Nivel O2
     # -------------------------------------------------
 
+    # ELIMINACIÓN DE TEMPORALES MUERTOS
     def remove_unused_temp_definitions(self, instructions: list[Instruction]) -> list[Instruction]:
         used: set[str] = set()
         result_reversed: list[Instruction] = []
@@ -224,13 +245,13 @@ class IROptimizer:
             dst = self.defined_temp(inst)
             args = self.used_temps(inst)
 
-            if dst is not None:
-                if dst not in used and self.is_pure_definition(inst):
+            if dst is not None and dst not in used and self.is_pure_definition(inst):
                     continue
+            
+            if dst is not None:
+                used.discard(dst)
 
-            used.difference_update({dst} if dst is not None else set())
             used.update(args)
-
             result_reversed.append(inst)
 
         return list(reversed(result_reversed))
@@ -379,8 +400,8 @@ if __name__ == "__main__":
         print("|PRUEBAS INSTRUCCIONES O1|".center(50, " "))
         print("="*50,"\n")
 
-        # Prueba constraint folding ADDI O1
-        print(">>> CONSTRAINT FOLDING\n")
+        # Prueba constant folding ADDI O1
+        print(">>> CONSTANT FOLDING\n")
 
         insts1 = [
             ("MOVI", 2, "R1"),
@@ -420,7 +441,7 @@ if __name__ == "__main__":
         insts3 = [
             ("MOVI", 2, "R1"),
             ("MOVI", 5, "R2"),
-            ("CMPI", ">", "R1", "R2", "R3")
+            ("CMPI", "<", "R1", "R2", "R3")
         ]
         
         print("O0 - Sin optimizar:")
@@ -468,6 +489,7 @@ if __name__ == "__main__":
 
         # Prueba Salto al siguiente label O1
         print(">>> SALTO AL SIGUIENTE LABEL\n")
+
         insts6 = [
             ("BRANCH", "L1"),
             ("LABEL", "L1")
@@ -500,6 +522,10 @@ if __name__ == "__main__":
         ]
         print("O0 - Sin optimizar:")
         print(insts7,"")
+
+        preout7 = optimize_insts(insts7, level=1)
+        print("O1 - Optimizado:")
+        print(preout7,"")
 
         out7 = optimize_insts(insts7, level=2)
         print("O2 - Optimizado:")

@@ -1,7 +1,7 @@
-x: integer = 10;
-y: integer = 5;
-
+/* Código Inalcanzable*/
 main: function void() = {
-    result: boolean = x >= y;
-    print result;
+    x: integer = 4 + 6 * 2 - 3;
+    print x;
+    return;
+    print "returning main";
 }

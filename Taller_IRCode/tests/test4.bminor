@@ -1,5 +1,14 @@
+/* Simplificación de ramas condicionales */
 main: function void() = {
-    a: integer = -10;
-    b: boolean = !true;
-    print a, b;
+    if (5 > 2){
+        print 1;
+    } else {
+        print 0;
+    }
+
+    if (3.2 < 6.8){
+        print 3.2;
+    } else {
+        print 6.8;
+    }
 }

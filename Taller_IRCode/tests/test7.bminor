@@ -1,18 +1,13 @@
-main: function void() = {
-    x: integer = 10;
-    y: integer = 0;
+main: function void () = {
+    x: integer = 2 + 3 * 4;
+    y: integer = x + 0;
 
-    if (x > 5){
-        print 1;
+    if (1 < 2) {
+        print y;
     } else {
-        print 0;
+        print 999;
     }
 
-    while (y > 10){
-        y++;
-    }
-
-    for (x = 0; x < 3; x++){
-        print x;
-    }
+    z: integer = 100;
+    print x;
 }

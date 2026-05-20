@@ -1,4 +1,5 @@
+/* Constant Folding */
 main: function void() = {
-    msg: string = "Hola mundo";
-    print msg;
+    num: integer = 4 * 2 + 3;
+    print num;
 }

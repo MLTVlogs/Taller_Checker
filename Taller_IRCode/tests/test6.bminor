@@ -1,6 +1,13 @@
+/* Eliminación de Temporales Muertos */
+Point: class = {
+    x: float;
+    y: float;
+}
+
 main: function void() = {
-    x: integer = 1;
-    y: integer = 2;
-    x++;
-    y--;
+    p: Point = new Point(1.2, 0.6);
+    px: float = p.x;
+    py: float = p.y;
+    sum: float = px + py;
+    print px, py;
 }

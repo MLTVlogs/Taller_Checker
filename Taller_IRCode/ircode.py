@@ -286,12 +286,12 @@ class IRCodeGen(Visitor):
     def binary_cmp_opcode(self, oper: str, ty: Type) -> str:
         suffix = self.type_suffix(ty)
         table = {
-            "==": f"CMP{suffix} ==",
-            "!=": f"CMP{suffix} !=",
-            "<": f"CMP{suffix} <",
-            "<=": f"CMP{suffix} <=",
-            ">": f"CMP{suffix} >",
-            ">=": f"CMP{suffix} >=",
+            "==": (f"CMP{suffix}", "=="),
+            "!=": (f"CMP{suffix}", "!="),
+            "<": (f"CMP{suffix}", "<"),
+            "<=": (f"CMP{suffix}", "<="),
+            ">": (f"CMP{suffix}", ">"),
+            ">=": (f"CMP{suffix}", ">="),
         }
         if oper not in table:
             raise NotImplementedError(f"Comparación no soportada: {oper}")
@@ -498,14 +498,16 @@ class IRCodeGen(Visitor):
             self.emit(self.print_opcode(ty), reg)
 
     def visit_If(self, node):
+        label_then = self.new_label()
         label_else = self.new_label()
         label_end = self.new_label()
 
         cond = self.visit(node.cond)
 
-        self.emit("CBRANCH", cond, label_else)
+        self.emit("CBRANCH", cond, label_then, label_else)
 
         #if verdadero
+        self.emit("LABEL", label_then)
         self.visit(node.then)
         self.emit("BRANCH", label_end)
 
@@ -518,6 +520,7 @@ class IRCodeGen(Visitor):
 
     def visit_While(self, node):
         label_start = self.new_label()
+        label_body = self.new_label()
         label_end = self.new_label()
 
         self.loop_actual = (label_end, label_start, label_start)#label start sale en las 2 para el continue, porque pues no tiene steps
@@ -525,9 +528,10 @@ class IRCodeGen(Visitor):
         #inicio del ciclo
         self.emit("LABEL", label_start)
         cond = self.visit(node.cond)
-        self.emit("CBRANCH", cond, label_end)
+        self.emit("CBRANCH", cond, label_body, label_end)
 
         #hace lo que sea que tenga el cuerp y luego lo devuelve al inicio
+        self.emit("LABEL", label_body)
         self.visit(node.body)
         self.emit("BRANCH", label_start)
 
@@ -547,8 +551,10 @@ class IRCodeGen(Visitor):
 
         self.emit("LABEL", label_start)
         if node.cond: #si tiene condicion la evalua y si no pues es un for infinito
+            label_body = self.new_label()
             cond = self.visit(node.cond)
-            self.emit("CBRANCH", cond, label_end)
+            self.emit("CBRANCH", cond, label_body, label_end)
+            self.emit("LABEL", label_body)
 
         #cosas del for
         self.visit(node.body)
@@ -642,7 +648,7 @@ class IRCodeGen(Visitor):
 
         if node.op in {"==", "!=", "<", "<=", ">", ">="}:
             opcode = self.binary_cmp_opcode(node.op, left_ty)
-            self.emit(opcode, left_reg, right_reg, out)
+            self.emit(*opcode, left_reg, right_reg, out)
             return out
         
         if node.op in {"&", "|", "^"}:
@@ -657,27 +663,28 @@ class IRCodeGen(Visitor):
             do_right = self.new_label()
 
             if node.op == "&&":
-                self.emit("CMPI !=", left_reg, 0, left_bool)
+                self.emit("CMPI", "!=", left_reg, 0, left_bool)
                 self.emit("MOVI", left_bool, out)#movi en caso de que el resultado de la parte izquierda sea 0 out temporal
 
                 #si lef_bool es 0 entonces saltamos a label_end para hacer el cortocircuito
-                self.emit("CBRANCH", left_bool, label_end)
+                do_left = self.new_label()
+                self.emit("CBRANCH", left_bool, do_left, label_end)
 
-                self.emit("CMPI !=", right_reg, 0, right_bool)
+                self.emit("LABEL", do_left)
+                self.emit("CMPI", "!=", right_reg, 0, right_bool)
                 self.emit("AND", left_bool, right_bool, out) #ya aca si ncomparacion normal y se escribe el out final
 
                 self.emit("LABEL", label_end)
 
             elif node.op == "||":
-                self.emit("CMPI !=", left_reg, 0, left_bool)
+                self.emit("CMPI", "!=", left_reg, 0, left_bool)
                 self.emit("MOVI", left_bool, out)
 
                 #si left bool es 0 entonces revisamos el otro, si no entonces saltamos al final porque si es 1 entonces ya es true todo
-                self.emit("CBRANCH", left_bool, do_right)
-                self.emit("BRANCH", label_end)
+                self.emit("CBRANCH", left_bool, label_end, do_right)
 
                 self.emit("LABEL", do_right)
-                self.emit("CMPI !=", right_reg, 0, right_bool)
+                self.emit("CMPI", "!=", right_reg, 0, right_bool)
                 self.emit("OR", left_bool, right_bool, out) #verifica todo (innecesario segun chayi pero asi se entiende mas facil)
 
                 self.emit("LABEL", label_end)
@@ -707,8 +714,10 @@ class IRCodeGen(Visitor):
 
     def visit_Literal(self, node):
         tmp = self.new_temp()
-        if node.kind in "integer":
+        if node.kind == "integer":
             self.emit("MOVI", int(node.value), tmp)
+        elif node.kind == "float":
+            self.emit("MOVF", float(node.value), tmp)
         elif node.kind == "boolean":
             self.emit("MOVI", 1 if node.value else 0, tmp)
         elif node.kind == "char":
@@ -766,14 +775,16 @@ class IRCodeGen(Visitor):
         return out
 
     def visit_TernOp(self, node):
+        label_then = self.new_label()
         label_else = self.new_label()
         label_end = self.new_label()
         out = self.new_temp()
         
         cond = self.visit(node.cond)
-        self.emit("CBRANCH", cond, label_else)
+        self.emit("CBRANCH", cond, label_then, label_else)
         
         #true
+        self.emit("LABEL", label_then)
         true_val = self.visit(node.then)
         
         true_ty = self.infer_type(node.then)
