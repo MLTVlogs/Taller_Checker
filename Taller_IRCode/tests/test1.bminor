@@ -1,5 +1,0 @@
-/* Constant Folding */
-main: function void() = {
-    num: integer = 4 * 2 + 3;
-    print num;
-}

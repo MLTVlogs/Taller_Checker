@@ -1,7 +1,0 @@
-/* Comparaciones Constantes */
-main: function void() = {
-    a1: boolean = 2 <= 1;
-    a2: boolean = 4 > 2;
-    a3: boolean = 3 == 3;
-    print a1, a2, a3;
-}
