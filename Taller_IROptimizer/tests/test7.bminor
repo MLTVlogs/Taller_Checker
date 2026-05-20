@@ -1,0 +1,13 @@
+main: function void () = {
+    x: integer = 2 + 3 * 4;
+    y: integer = x + 0;
+
+    if (1 < 2) {
+        print y;
+    } else {
+        print 999;
+    }
+
+    z: integer = 100;
+    print x;
+}

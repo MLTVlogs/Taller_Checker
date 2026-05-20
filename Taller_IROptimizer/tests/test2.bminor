@@ -1,0 +1,12 @@
+/* Simplificación algebráica */
+main: function void() = {
+    a: integer = 12 + 0;
+    b: integer = 0 + 4;
+    c: integer = 6 - 0;
+    d: integer = 3 * 1;
+    e: integer = 1 * 5;
+    f: integer = 14 * 0;
+    g: integer = 0 * 9;
+    h: integer = 2 / 1;
+    print a, b, c, d, e, f, g, h;
+}

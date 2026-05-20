@@ -1,0 +1,7 @@
+/* Código Inalcanzable*/
+main: function void() = {
+    x: integer = 4 + 6 * 2 - 3;
+    print x;
+    return;
+    print "returning main";
+}
