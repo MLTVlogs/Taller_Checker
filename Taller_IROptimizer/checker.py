@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Optional
-from multimethod import multimeta
 from rich import print
 
 from symtab import Symtab
@@ -465,7 +464,7 @@ class Checker(Visitor):
     def visit_Continue(self, n):
         pass
 
-def semantic_check(txt):
+def semantic_check(txt):#vaina para conectar al optimizador y hacer como pipeline sioque
     from parser import parse
     ast = parse(txt)
     checker = Checker.check(ast)
@@ -474,7 +473,6 @@ def semantic_check(txt):
 
 if __name__ == "__main__":
     import sys
-    from parser import parse
     
     if len(sys.argv) != 2:
         print("Uso: python checker.py <archivo.bminor>")

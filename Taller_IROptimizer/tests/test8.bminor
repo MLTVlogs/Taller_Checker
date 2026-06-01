@@ -1,0 +1,22 @@
+/* Test de Arreglos */
+main: function void() = {
+    arr: array[5] integer;
+    i: integer = 0;
+    
+    /* Llenar arreglo */
+    while (i < 5) {
+        arr[i] = i * 2;
+        i = i + 1;
+    }
+    
+    /* Imprimir arreglo */
+    i = 0;
+    while (i < 5) {
+        print arr[i];
+        i = i + 1;
+    }
+    
+    /* Acceso aleatorio */
+    print arr[2];
+    print arr[4];
+}

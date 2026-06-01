@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Optional
 from rich import print
-from astopt import optimize_ast_o1
+#from astopt import optimize_ast_o1
 from model import *
 from checker import *
 
@@ -913,575 +913,560 @@ class IRCodeGen(Visitor):
 if __name__ == "__main__":
     import sys
 
-    if "-ir" in sys.argv:
-        filename = sys.argv[1]
-        with open(filename, encoding="utf-8") as f:
-            txt = f.read()
-            check, errors, ast = semantic_check(txt) #.ok(), lista de errores, ast
-            asto1 = optimize_ast_o1(ast)
+    print("Demo de IRCodeGen con ejemplos simples si desea ejecutar codigo txt usar -ir:\n")
+    # msg: string = "Hola mundo";
+    # print(msg);
+    ast = Program([
+        DeclInit(
+            name="main",
+            typ=FuncType(ret=SimpleType(name="void"), params=[]),
+            init=Block(stmts=[
+                DeclInit(
+                    name="msg",
+                    typ=SimpleType(name="string"),
+                    init=Literal(kind="string", value="Hola mundo"),
+                ),
+                Print(values=[Name(id="msg")]),
+            ]),
+        )
+    ])
+    ir = IRCodeGen.generate(ast)
+    print(ir.format())
+    
+    print("\n" + "="*50 + "\n")
+    
+    # Prueba: print("hola") directamente
+    ast2 = Program([
+        DeclInit(
+            name="main",
+            typ=FuncType(ret=SimpleType("void"), params=[]),
+            init=Block(stmts=[
+                Print(values=[Literal(kind="string", value="Hola mundo")]),
+            ]),
+        )
+    ])
+    ir2 = IRCodeGen.generate(ast2)
+    print(ir2.format())
 
-            if not check: 
-                print(errors) 
-                sys.exit(1) #si hubieron errores semanticos pues no ejecuta ni mierda
+    print("\n" + "="*50 + "\n")
 
-            ir = IRCodeGen.generate(asto1)
-            print(ir.format())
+    #prueba: x = (12 == 34)
+    ast3 = Program([
+        DeclInit(
+            name="main",
+            typ=FuncType(ret=SimpleType("void"), params=[]),
+            init=Block(stmts=[
+                DeclTyped(name="x", typ=SimpleType("boolean")),
+                Assign(
+                    target=Name(id="x"),
+                    value=BinOp(
+                        left=Literal(kind="integer", value=12),
+                        op="==",
+                        right=Literal(kind="integer", value=34),
+                    )
+                ),
+            ]),
+        )
+    ])
+    ir3 = IRCodeGen.generate(ast3)
+    print(ir3.format())
 
-    else:
-        print("Demo de IRCodeGen con ejemplos simples si desea ejecutar codigo txt usar -ir:\n")
-        # msg: string = "Hola mundo";
-        # print(msg);
-        ast = Program([
-            DeclInit(
-                name="main",
-                typ=FuncType(ret=SimpleType(name="void"), params=[]),
-                init=Block(stmts=[
-                    DeclInit(
-                        name="msg",
-                        typ=SimpleType(name="string"),
-                        init=Literal(kind="string", value="Hola mundo"),
+    print("\n" + "="*50 + "\n")
+
+    # Prueba: operaciones unarias
+    # a = -10; b = !true;
+    ast4 = Program([
+        DeclInit(
+            name="main",
+            typ=FuncType(ret=SimpleType("void"), params=[]),
+            init=Block(stmts=[
+                DeclInit(
+                    name="a",
+                    typ=SimpleType("integer"),
+                    init=UnaryOp(op="-", expr=Literal(kind="integer", value=10)),
+                ),
+                DeclInit(
+                    name="b",
+                    typ=SimpleType("boolean"),
+                    init=UnaryOp(op="!", expr=Literal(kind="boolean", value="true")),
+                ),
+                Print(values=[Name(id="a"), Name(id="b")]),
+            ]),
+        )
+    ])
+    ir4 = IRCodeGen.generate(ast4)
+    print(ir4.format())
+
+    print("\n" + "="*50 + "\n")
+
+    # Prueba: comparaciones con >=
+    # x: integer = 10; y: integer = 5;
+    # result = x >= y
+    ast5 = Program([
+        DeclInit(
+            name="x",
+            typ=SimpleType(name = "integer"),
+            init=Literal(kind="integer", value=10),
+        ),
+        DeclInit(
+            name="y",
+            typ=SimpleType(name = "integer"),
+            init=Literal(kind="integer", value=5),
+        ),
+        DeclInit(
+            name="main",
+            typ=FuncType(ret=SimpleType("void"), params=[]),
+            init=Block(stmts=[
+                DeclInit(
+                    name="result",
+                    typ=SimpleType("boolean"),
+                    init=BinOp(
+                        left=Name(id="x"),
+                        op=">=",
+                        right=Name(id="y"),
                     ),
-                    Print(values=[Name(id="msg")]),
-                ]),
-            )
-        ])
-        ir = IRCodeGen.generate(ast)
-        print(ir.format())
-        
-        print("\n" + "="*50 + "\n")
-        
-        # Prueba: print("hola") directamente
-        ast2 = Program([
-            DeclInit(
-                name="main",
-                typ=FuncType(ret=SimpleType("void"), params=[]),
-                init=Block(stmts=[
-                    Print(values=[Literal(kind="string", value="Hola mundo")]),
-                ]),
-            )
-        ])
-        ir2 = IRCodeGen.generate(ast2)
-        print(ir2.format())
+                ),
+                Print(values=[Name(id="result")]),
+            ]),
+        )
+    ])
+    ir5 = IRCodeGen.generate(ast5)
+    print(ir5.format())
 
-        print("\n" + "="*50 + "\n")
+    print("\n" + "="*50 + "\n")
 
-        #prueba: x = (12 == 34)
-        ast3 = Program([
-            DeclInit(
-                name="main",
-                typ=FuncType(ret=SimpleType("void"), params=[]),
-                init=Block(stmts=[
-                    DeclTyped(name="x", typ=SimpleType("boolean")),
-                    Assign(
-                        target=Name(id="x"),
-                        value=BinOp(
-                            left=Literal(kind="integer", value=12),
-                            op="==",
-                            right=Literal(kind="integer", value=34),
-                        )
+    # Prueba: postfijos
+    ast6 = Program([
+        DeclInit(
+            name="main",
+            typ=FuncType(ret=SimpleType("Void"), params=[]),
+            init=Block(stmts=[
+                DeclInit(
+                    name="x",
+                    typ=SimpleType("integer"),
+                    init=Literal(kind="integer", value=1),
+                ),
+                DeclInit(
+                    name="y",
+                    typ=SimpleType("integer"),
+                    init=Literal(kind="integer", value=2),
+                ),
+                ExprStmt(
+                    expr=PostfixOp(
+                        expr=Name(id="x"),
+                        op="++",
+                    )
+                ),
+                ExprStmt(
+                    expr=PostfixOp(
+                        expr=Name(id="y"),
+                        op="--",
+                    )
+                ),
+                Print(values=[Name(id="x"), Name(id="y")]),
+            ]),
+        )
+    ])
+    ir6 = IRCodeGen.generate(ast6)
+    print(ir6.format())
+
+    print("\n" + "="*50 + "\n")
+
+    # Prueba: if, while y for
+    # if (x > 5) { print(1); } else { print(0); }
+    # while (y < 10) { y++; }
+    # for (i = 0; i < 3; i++) { print(i); }
+    ast7 = Program([
+        DeclInit(
+            name="main",
+            typ=FuncType(ret=SimpleType("void"), params=[]),
+            init=Block(stmts=[
+                DeclInit(
+                    name="x",
+                    typ=SimpleType("integer"),
+                    init=Literal(kind="integer", value=10),
+                ),
+                DeclInit(
+                    name="y",
+                    typ=SimpleType("integer"),
+                    init=Literal(kind="integer", value=0),
+                ),
+                # if (x > 5)
+                If(
+                    cond=BinOp(
+                        left=Name(id="x"),
+                        op=">",
+                        right=Literal(kind="integer", value=5),
                     ),
-                ]),
-            )
-        ])
-        ir3 = IRCodeGen.generate(ast3)
-        print(ir3.format())
-
-        print("\n" + "="*50 + "\n")
-
-        # Prueba: operaciones unarias
-        # a = -10; b = !true;
-        ast4 = Program([
-            DeclInit(
-                name="main",
-                typ=FuncType(ret=SimpleType("void"), params=[]),
-                init=Block(stmts=[
-                    DeclInit(
-                        name="a",
-                        typ=SimpleType("integer"),
-                        init=UnaryOp(op="-", expr=Literal(kind="integer", value=10)),
+                    then=Block(stmts=[
+                        Print(values=[Literal(kind="integer", value=1)]),
+                    ]),
+                    otherwise=Block(stmts=[
+                        Print(values=[Literal(kind="integer", value=0)]),
+                    ]),
+                ),
+                # while (y < 10) { y++; }
+                While(
+                    cond=BinOp(
+                        left=Name(id="y"),
+                        op="<",
+                        right=Literal(kind="integer", value=10),
                     ),
-                    DeclInit(
-                        name="b",
-                        typ=SimpleType("boolean"),
-                        init=UnaryOp(op="!", expr=Literal(kind="boolean", value="true")),
-                    ),
-                    Print(values=[Name(id="a"), Name(id="b")]),
-                ]),
-            )
-        ])
-        ir4 = IRCodeGen.generate(ast4)
-        print(ir4.format())
-
-        print("\n" + "="*50 + "\n")
-
-        # Prueba: comparaciones con >=
-        # x: integer = 10; y: integer = 5;
-        # result = x >= y
-        ast5 = Program([
-            DeclInit(
-                name="x",
-                typ=SimpleType(name = "integer"),
-                init=Literal(kind="integer", value=10),
-            ),
-            DeclInit(
-                name="y",
-                typ=SimpleType(name = "integer"),
-                init=Literal(kind="integer", value=5),
-            ),
-            DeclInit(
-                name="main",
-                typ=FuncType(ret=SimpleType("void"), params=[]),
-                init=Block(stmts=[
-                    DeclInit(
-                        name="result",
-                        typ=SimpleType("boolean"),
-                        init=BinOp(
-                            left=Name(id="x"),
-                            op=">=",
-                            right=Name(id="y"),
+                    body=Block(stmts=[
+                        ExprStmt(
+                            expr=PostfixOp(
+                                expr=Name(id="y"),
+                                op="++",
+                            )
                         ),
+                    ]),
+                ),
+                # for (i = 0; i < 3; i++) { print(i); }
+                For(
+                    init=Assign(
+                        target=Name(id="x"),
+                        value=Literal(kind="integer", value=0),
                     ),
-                    Print(values=[Name(id="result")]),
-                ]),
-            )
-        ])
-        ir5 = IRCodeGen.generate(ast5)
-        print(ir5.format())
-
-        print("\n" + "="*50 + "\n")
-
-        # Prueba: postfijos
-        ast6 = Program([
-            DeclInit(
-                name="main",
-                typ=FuncType(ret=SimpleType("Void"), params=[]),
-                init=Block(stmts=[
-                    DeclInit(
-                        name="x",
-                        typ=SimpleType("integer"),
-                        init=Literal(kind="integer", value=1),
+                    cond=BinOp(
+                        left=Name(id="x"),
+                        op="<",
+                        right=Literal(kind="integer", value=3),
                     ),
-                    DeclInit(
-                        name="y",
-                        typ=SimpleType("integer"),
-                        init=Literal(kind="integer", value=2),
-                    ),
-                    ExprStmt(
+                    step=ExprStmt(
                         expr=PostfixOp(
                             expr=Name(id="x"),
                             op="++",
                         )
                     ),
-                    ExprStmt(
-                        expr=PostfixOp(
-                            expr=Name(id="y"),
-                            op="--",
-                        )
-                    ),
-                    Print(values=[Name(id="x"), Name(id="y")]),
-                ]),
-            )
-        ])
-        ir6 = IRCodeGen.generate(ast6)
-        print(ir6.format())
-
-        print("\n" + "="*50 + "\n")
-
-        # Prueba: if, while y for
-        # if (x > 5) { print(1); } else { print(0); }
-        # while (y < 10) { y++; }
-        # for (i = 0; i < 3; i++) { print(i); }
-        ast7 = Program([
-            DeclInit(
-                name="main",
-                typ=FuncType(ret=SimpleType("void"), params=[]),
-                init=Block(stmts=[
-                    DeclInit(
-                        name="x",
-                        typ=SimpleType("integer"),
-                        init=Literal(kind="integer", value=10),
-                    ),
-                    DeclInit(
-                        name="y",
-                        typ=SimpleType("integer"),
-                        init=Literal(kind="integer", value=0),
-                    ),
-                    # if (x > 5)
-                    If(
-                        cond=BinOp(
-                            left=Name(id="x"),
-                            op=">",
-                            right=Literal(kind="integer", value=5),
-                        ),
-                        then=Block(stmts=[
-                            Print(values=[Literal(kind="integer", value=1)]),
-                        ]),
-                        otherwise=Block(stmts=[
-                            Print(values=[Literal(kind="integer", value=0)]),
-                        ]),
-                    ),
-                    # while (y < 10) { y++; }
-                    While(
-                        cond=BinOp(
-                            left=Name(id="y"),
-                            op="<",
-                            right=Literal(kind="integer", value=10),
-                        ),
-                        body=Block(stmts=[
-                            ExprStmt(
-                                expr=PostfixOp(
-                                    expr=Name(id="y"),
-                                    op="++",
-                                )
-                            ),
-                        ]),
-                    ),
-                    # for (i = 0; i < 3; i++) { print(i); }
-                    For(
-                        init=Assign(
-                            target=Name(id="x"),
-                            value=Literal(kind="integer", value=0),
-                        ),
-                        cond=BinOp(
-                            left=Name(id="x"),
-                            op="<",
-                            right=Literal(kind="integer", value=3),
-                        ),
-                        step=ExprStmt(
-                            expr=PostfixOp(
-                                expr=Name(id="x"),
-                                op="++",
-                            )
-                        ),
-                        body=Block(stmts=[
-                            Print(values=[Name(id="x")]),
-                        ]),
-                    ),
-                ]),
-            )
-        ])
-        ir7 = IRCodeGen.generate(ast7)
-        print(ir7.format())
-
-        print("\n" + "="*50 + "\n")
-
-        # Prueba: arrays bidimensionales
-        # Simula: matriz[2][3]
-        # matriz[0][0] = 1
-        # matriz[1][2] = 5
-        # x = matriz[0][0]
-        # y = matriz[1][2]
-        ast8 = Program([
-            DeclTyped(
-                name="matriz",
-                typ=ArraySizedType(size_expr=2, elem=ArraySizedType(size_expr=3, elem=SimpleType("integer")))
-            ),
-            DeclInit(
-                name="main",
-                typ=FuncType(ret=SimpleType("void"), params=[]),
-                init=Block(stmts=[
-                    # matriz[0][0] = 1
-                    Assign(
-                        target=Index(
-                            base="matriz",
-                            indices=[
-                                Literal(kind="integer", value=0),
-                                Literal(kind="integer", value=0),
-                            ],
-                        ),
-                        value=Literal(kind="integer", value=1),
-                    ),
-                    # matriz[1][2] = 5
-                    Assign(
-                        target=Index(
-                            base="matriz",
-                            indices=[
-                                Literal(kind="integer", value=1),
-                                Literal(kind="integer", value=2),
-                            ],
-                        ),
-                        value=Literal(kind="integer", value=5),
-                    ),
-                    # x = matriz[0][0]
-                    DeclInit(
-                        name="x",
-                        typ=SimpleType("integer"),
-                        init=Index(
-                            base="matriz",
-                            indices=[
-                                Literal(kind="integer", value=0),
-                                Literal(kind="integer", value=0),
-                            ],
-                        ),
-                    ),
-                    # y = matriz[1][2]
-                    DeclInit(
-                        name="y",
-                        typ=SimpleType("integer"),
-                        init=Index(
-                            base="matriz",
-                            indices=[
-                                Literal(kind="integer", value=1),
-                                Literal(kind="integer", value=2),
-                            ],
-                        ),
-                    ),
-                    # print(x, y)
-                    Print(values=[Name(id="x"), Name(id="y")]),
-                ]),
-            )
-        ])
-        ir8 = IRCodeGen.generate(ast8)
-        print(ir8.format())
-
-        print("\n" + "="*50 + "\n")
-
-        ast9 = Program([
-            DeclInit(
-                name="main",
-                typ=FuncType(ret=SimpleType("void"), params=[]),
-                init=Block(stmts=[
-                    DeclTyped(name="i", typ=SimpleType("integer")),
-                    For(
-                        init=Assign(
-                            target=Name(id="i"),
-                            value=Literal(kind="integer", value=0),
-                        ),
-                        cond=BinOp(
-                            left=Name(id="i"),
-                            op="<",
-                            right=Literal(kind="integer", value=10),
-                        ),
-                        step=Assign(
-                            target=Name(id="i"),
-                            value=BinOp(
-                                left=Name(id="i"),
-                                op="+",
-                                right=Literal(kind="integer", value=1),
-                            ),
-                        ),
-                        body=Block(stmts=[
-                            If(
-                                cond=BinOp(
-                                    left=Name(id="i"),
-                                    op="==",
-                                    right=Literal(kind="integer", value=5),
-                                ),
-                                then=Continue(),
-                            ),
-                            If(
-                                cond=BinOp(
-                                    left=Name(id="i"),
-                                    op="==",
-                                    right=Literal(kind="integer", value=8),
-                                ),
-                                then=Break(),
-                            ),
-                            Print(values=[Name(id="i")]),
-                        ]),
-                    ),
-                ]),
-            )
-        ])
-        ir9 = IRCodeGen.generate(ast9)
-        print(ir9.format())
-
-        print("\n" + "="*50 + "\n")
-
-        # Prueba: llamadas Call y MemberCall
-        ast10 = Program([
-            DeclInit(
-                name="foo",
-                typ=FuncType(ret=SimpleType("integer"), params=[
-                    Param(name="a", typ=SimpleType("integer")),
-                    Param(name="b", typ=SimpleType("integer")),
-                ]),
-                init=Block(stmts=[
-                    Return(
-                        value=BinOp(
-                            left=Name(id="a"),
-                            op="+",
-                            right=Name(id="b"),
-                        )
-                    ),
-                ]),
-            ),
-            DeclInit(
-                name="bar",
-                typ=FuncType(ret=INT, params=[Param(name="x", typ=INT)]),
-                init=Block(stmts=[
-                    Return(
-                        value=BinOp(
-                            left=Name(id="x"),
-                            op="*",
-                            right=Literal(kind="integer", value=2),
-                        )
-                    ),
-                ]),
-            ),
-            DeclInit(
-                name="main",
-                typ=FuncType(ret=VOID, params=[]),
-                init=Block(stmts=[
-                    DeclInit(
-                        name="sum",
-                        typ=SimpleType("integer"),
-                        init=Call(
-                            func="foo",
-                            args=[
-                                Literal(kind="integer", value=3),
-                                Literal(kind="integer", value=4),
-                            ],
-                        ),
-                    ),
-                    DeclInit(
-                        name="obj",
-                        typ=INT,
-                        init=Literal(kind="integer", value=0),
-                    ),
-                    DeclInit(
-                        name="result",
-                        typ=INT,
-                        init=MemberCall(
-                            target=Name(id="obj"),
-                            members=[
-                                Call(
-                                    func="bar",
-                                    args=[Literal(kind="integer", value=5)],
-                                ),
-                            ],
-                        ),
-                    ),
-                    Print(values=[Name(id="sum"), Name(id="result")]),
-                ]),
-            ),
-        ])
-        ir10 = IRCodeGen.generate(ast10)
-        print(ir10.format())
-
-        print("\n" + "="*50 + "\n")
-
-        # Prueba: clases, constructores y member calls
-        # Definición simple de clase Point
-        ast11 = Program([
-            ClassDecl(
-                name="Point",
-                body=[
-                    DeclTyped(name="x", typ=SimpleType("integer")),
-                    DeclTyped(name="y", typ=SimpleType("integer")),
-                ],
-            ),
-            DeclInit(
-                name="main",
-                typ=FuncType(ret=SimpleType(name="void"), params=[]),
-                init=Block(stmts=[
-                    # Crear instancia de Point usando constructor
-                    DeclInit(
-                        name="p",
-                        typ=SimpleType("Point"),
-                        init=Constructor(
-                            type=SimpleType(name = "Point"),
-                            atts=[
-                                Literal(kind="integer", value=10),
-                                Literal(kind="integer", value=20),
-                            ],
-                        ),
-                    ),
-                    # Simular acceso a miembros usando MemberCall
-                    DeclInit(
-                        name="px",
-                        typ=SimpleType(name = "integer"),
-                        init=MemberCall(
-                            target=Name(id="p"),
-                            members=[
-                                Name(id="x"),
-                            ],
-                        ),
-                    ),
-                    DeclInit(
-                        name="py",
-                        typ=SimpleType(name = "integer"),
-                        init=MemberCall(
-                            target=Name(id="p"),
-                            members=[
-                                Name(id="y"),
-                            ],
-                        ),
-                    ),
-                    # Imprimir resultados
-                    Print(values=[Name(id="px"), Name(id="py")]),
-                ]),
-            ),
-        ])
-        ir11 = IRCodeGen.generate(ast11)
-        print(ir11.format())
-
-        print("\n" + "="*50 + "\n")
-
-        # Prueba: Arrays con definición e inicialización
-        # arr: integer[] = ...
-        # arr[0] = 1; arr[1] = 2; arr[2] = 3; arr[3] = 5
-        # print(arr[0], arr[1], arr[2], arr[3])
-
-        ast12 = Program([
-            DeclTyped(
-                name="arr",
-                typ=ArrayType(elem=INT),
-            ),
-            DeclInit(
-                name="main",
-                typ=FuncType(ret=VOID, params=[]),
-                init=Block(stmts=[
-                    # Asignaciones a índices específicos
-                    Assign(
-                        target=Index(
-                            base="arr",
-                            indices=[Literal(kind="integer", value=0)],
-                        ),
-                        value=Literal(kind="integer", value=1),
-                    ),
-                    Assign(
-                        target=Index(
-                            base="arr",
-                            indices=[Literal(kind="integer", value=1)],
-                        ),
-                        value=Literal(kind="integer", value=2),
-                    ),
-                    Assign(
-                        target=Index(
-                            base="arr",
-                            indices=[Literal(kind="integer", value=2)],
-                        ),
-                        value=Literal(kind="integer", value=3),
-                    ),
-                    Assign(
-                        target=Index(
-                            base="arr",
-                            indices=[Literal(kind="integer", value=3)],
-                        ),
-                        value=Literal(kind="integer", value=5),
-                    ),
-                    # Lectura y impresión de índices
-                    Print(values=[
-                        Index(
-                            base="arr",
-                            indices=[Literal(kind="integer", value=0)],
-                        ),
-                        Index(
-                            base="arr",
-                            indices=[Literal(kind="integer", value=1)],
-                        ),
-                        Index(
-                            base="arr",
-                            indices=[Literal(kind="integer", value=2)],
-                        ),
-                        Index(
-                            base="arr",
-                            indices=[Literal(kind="integer", value=3)],
-                        ),
+                    body=Block(stmts=[
+                        Print(values=[Name(id="x")]),
                     ]),
+                ),
+            ]),
+        )
+    ])
+    ir7 = IRCodeGen.generate(ast7)
+    print(ir7.format())
+
+    print("\n" + "="*50 + "\n")
+
+    # Prueba: arrays bidimensionales
+    # Simula: matriz[2][3]
+    # matriz[0][0] = 1
+    # matriz[1][2] = 5
+    # x = matriz[0][0]
+    # y = matriz[1][2]
+    ast8 = Program([
+        DeclTyped(
+            name="matriz",
+            typ=ArraySizedType(size_expr=2, elem=ArraySizedType(size_expr=3, elem=SimpleType("integer")))
+        ),
+        DeclInit(
+            name="main",
+            typ=FuncType(ret=SimpleType("void"), params=[]),
+            init=Block(stmts=[
+                # matriz[0][0] = 1
+                Assign(
+                    target=Index(
+                        base="matriz",
+                        indices=[
+                            Literal(kind="integer", value=0),
+                            Literal(kind="integer", value=0),
+                        ],
+                    ),
+                    value=Literal(kind="integer", value=1),
+                ),
+                # matriz[1][2] = 5
+                Assign(
+                    target=Index(
+                        base="matriz",
+                        indices=[
+                            Literal(kind="integer", value=1),
+                            Literal(kind="integer", value=2),
+                        ],
+                    ),
+                    value=Literal(kind="integer", value=5),
+                ),
+                # x = matriz[0][0]
+                DeclInit(
+                    name="x",
+                    typ=SimpleType("integer"),
+                    init=Index(
+                        base="matriz",
+                        indices=[
+                            Literal(kind="integer", value=0),
+                            Literal(kind="integer", value=0),
+                        ],
+                    ),
+                ),
+                # y = matriz[1][2]
+                DeclInit(
+                    name="y",
+                    typ=SimpleType("integer"),
+                    init=Index(
+                        base="matriz",
+                        indices=[
+                            Literal(kind="integer", value=1),
+                            Literal(kind="integer", value=2),
+                        ],
+                    ),
+                ),
+                # print(x, y)
+                Print(values=[Name(id="x"), Name(id="y")]),
+            ]),
+        )
+    ])
+    ir8 = IRCodeGen.generate(ast8)
+    print(ir8.format())
+
+    print("\n" + "="*50 + "\n")
+
+    ast9 = Program([
+        DeclInit(
+            name="main",
+            typ=FuncType(ret=SimpleType("void"), params=[]),
+            init=Block(stmts=[
+                DeclTyped(name="i", typ=SimpleType("integer")),
+                For(
+                    init=Assign(
+                        target=Name(id="i"),
+                        value=Literal(kind="integer", value=0),
+                    ),
+                    cond=BinOp(
+                        left=Name(id="i"),
+                        op="<",
+                        right=Literal(kind="integer", value=10),
+                    ),
+                    step=Assign(
+                        target=Name(id="i"),
+                        value=BinOp(
+                            left=Name(id="i"),
+                            op="+",
+                            right=Literal(kind="integer", value=1),
+                        ),
+                    ),
+                    body=Block(stmts=[
+                        If(
+                            cond=BinOp(
+                                left=Name(id="i"),
+                                op="==",
+                                right=Literal(kind="integer", value=5),
+                            ),
+                            then=Continue(),
+                        ),
+                        If(
+                            cond=BinOp(
+                                left=Name(id="i"),
+                                op="==",
+                                right=Literal(kind="integer", value=8),
+                            ),
+                            then=Break(),
+                        ),
+                        Print(values=[Name(id="i")]),
+                    ]),
+                ),
+            ]),
+        )
+    ])
+    ir9 = IRCodeGen.generate(ast9)
+    print(ir9.format())
+
+    print("\n" + "="*50 + "\n")
+
+    # Prueba: llamadas Call y MemberCall
+    ast10 = Program([
+        DeclInit(
+            name="foo",
+            typ=FuncType(ret=SimpleType("integer"), params=[
+                Param(name="a", typ=SimpleType("integer")),
+                Param(name="b", typ=SimpleType("integer")),
+            ]),
+            init=Block(stmts=[
+                Return(
+                    value=BinOp(
+                        left=Name(id="a"),
+                        op="+",
+                        right=Name(id="b"),
+                    )
+                ),
+            ]),
+        ),
+        DeclInit(
+            name="bar",
+            typ=FuncType(ret=INT, params=[Param(name="x", typ=INT)]),
+            init=Block(stmts=[
+                Return(
+                    value=BinOp(
+                        left=Name(id="x"),
+                        op="*",
+                        right=Literal(kind="integer", value=2),
+                    )
+                ),
+            ]),
+        ),
+        DeclInit(
+            name="main",
+            typ=FuncType(ret=VOID, params=[]),
+            init=Block(stmts=[
+                DeclInit(
+                    name="sum",
+                    typ=SimpleType("integer"),
+                    init=Call(
+                        func="foo",
+                        args=[
+                            Literal(kind="integer", value=3),
+                            Literal(kind="integer", value=4),
+                        ],
+                    ),
+                ),
+                DeclInit(
+                    name="obj",
+                    typ=INT,
+                    init=Literal(kind="integer", value=0),
+                ),
+                DeclInit(
+                    name="result",
+                    typ=INT,
+                    init=MemberCall(
+                        target=Name(id="obj"),
+                        members=[
+                            Call(
+                                func="bar",
+                                args=[Literal(kind="integer", value=5)],
+                            ),
+                        ],
+                    ),
+                ),
+                Print(values=[Name(id="sum"), Name(id="result")]),
+            ]),
+        ),
+    ])
+    ir10 = IRCodeGen.generate(ast10)
+    print(ir10.format())
+
+    print("\n" + "="*50 + "\n")
+
+    # Prueba: clases, constructores y member calls
+    # Definición simple de clase Point
+    ast11 = Program([
+        ClassDecl(
+            name="Point",
+            body=[
+                DeclTyped(name="x", typ=SimpleType("integer")),
+                DeclTyped(name="y", typ=SimpleType("integer")),
+            ],
+        ),
+        DeclInit(
+            name="main",
+            typ=FuncType(ret=SimpleType(name="void"), params=[]),
+            init=Block(stmts=[
+                # Crear instancia de Point usando constructor
+                DeclInit(
+                    name="p",
+                    typ=SimpleType("Point"),
+                    init=Constructor(
+                        type=SimpleType(name = "Point"),
+                        atts=[
+                            Literal(kind="integer", value=10),
+                            Literal(kind="integer", value=20),
+                        ],
+                    ),
+                ),
+                # Simular acceso a miembros usando MemberCall
+                DeclInit(
+                    name="px",
+                    typ=SimpleType(name = "integer"),
+                    init=MemberCall(
+                        target=Name(id="p"),
+                        members=[
+                            Name(id="x"),
+                        ],
+                    ),
+                ),
+                DeclInit(
+                    name="py",
+                    typ=SimpleType(name = "integer"),
+                    init=MemberCall(
+                        target=Name(id="p"),
+                        members=[
+                            Name(id="y"),
+                        ],
+                    ),
+                ),
+                # Imprimir resultados
+                Print(values=[Name(id="px"), Name(id="py")]),
+            ]),
+        ),
+    ])
+    ir11 = IRCodeGen.generate(ast11)
+    print(ir11.format())
+
+    print("\n" + "="*50 + "\n")
+
+    # Prueba: Arrays con definición e inicialización
+    # arr: integer[] = ...
+    # arr[0] = 1; arr[1] = 2; arr[2] = 3; arr[3] = 5
+    # print(arr[0], arr[1], arr[2], arr[3])
+
+    ast12 = Program([
+        DeclTyped(
+            name="arr",
+            typ=ArrayType(elem=INT),
+        ),
+        DeclInit(
+            name="main",
+            typ=FuncType(ret=VOID, params=[]),
+            init=Block(stmts=[
+                # Asignaciones a índices específicos
+                Assign(
+                    target=Index(
+                        base="arr",
+                        indices=[Literal(kind="integer", value=0)],
+                    ),
+                    value=Literal(kind="integer", value=1),
+                ),
+                Assign(
+                    target=Index(
+                        base="arr",
+                        indices=[Literal(kind="integer", value=1)],
+                    ),
+                    value=Literal(kind="integer", value=2),
+                ),
+                Assign(
+                    target=Index(
+                        base="arr",
+                        indices=[Literal(kind="integer", value=2)],
+                    ),
+                    value=Literal(kind="integer", value=3),
+                ),
+                Assign(
+                    target=Index(
+                        base="arr",
+                        indices=[Literal(kind="integer", value=3)],
+                    ),
+                    value=Literal(kind="integer", value=5),
+                ),
+                # Lectura y impresión de índices
+                Print(values=[
+                    Index(
+                        base="arr",
+                        indices=[Literal(kind="integer", value=0)],
+                    ),
+                    Index(
+                        base="arr",
+                        indices=[Literal(kind="integer", value=1)],
+                    ),
+                    Index(
+                        base="arr",
+                        indices=[Literal(kind="integer", value=2)],
+                    ),
+                    Index(
+                        base="arr",
+                        indices=[Literal(kind="integer", value=3)],
+                    ),
                 ]),
-            ),
-        ])
-        ir12 = IRCodeGen.generate(ast12)
-        print(ir12.format())
+            ]),
+        ),
+    ])
+    ir12 = IRCodeGen.generate(ast12)
+    print(ir12.format())

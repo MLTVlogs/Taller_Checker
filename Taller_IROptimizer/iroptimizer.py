@@ -113,16 +113,16 @@ class IROptimizer:
                     a_val = const[a] if a in const else None
                     b_val = const[b] if b in const else None
                     if op in {"ADDI", "ADDF"}:
-                        if a_val == 0:
+                        if a_val == 0 and b in const:
                             out.append(("MOVI" if op.endswith("I") else "MOVF", b, dst))
                             const[dst] = b_val
                             simplified = True
-                        elif b_val == 0:
+                        elif b_val == 0 and a in const:
                             out.append(("MOVI" if op.endswith("I") else "MOVF", a, dst))
                             const[dst] = a_val
                             simplified = True
                     elif op in {"SUBI", "SUBF"}:
-                        if b_val == 0:
+                        if b_val == 0 and a in const:
                             out.append(("MOVI" if op.endswith("I") else "MOVF", a, dst))
                             const[dst] = a_val
                             simplified = True
@@ -131,7 +131,7 @@ class IROptimizer:
                             out.append(("MOVI" if op.endswith("I") else "MOVF", b, dst))
                             const[dst] = b_val
                             simplified = True
-                        elif a_val == 0:
+                        elif a_val == 0 and b in const:
                             out.append(("MOVI" if op.endswith("I") else "MOVF", 0, dst))
                             const[dst] = 0
                             simplified = True
@@ -139,7 +139,7 @@ class IROptimizer:
                             out.append(("MOVI" if op.endswith("I") else "MOVF", a, dst))
                             const[dst] = a_val
                             simplified = True
-                        elif b_val == 0:
+                        elif b_val == 0 and a in const:
                             out.append(("MOVI" if op.endswith("I") else "MOVF", 0, dst))
                             const[dst] = 0
                             simplified = True
@@ -343,7 +343,6 @@ def optimize_insts(insts, level):
 if __name__ == "__main__":
     import sys
     from checker import semantic_check
-    from astopt import optimize_ast_o1
 
     if "-O0" in sys.argv:
         filename = sys.argv[1]
